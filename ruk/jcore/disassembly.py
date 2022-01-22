@@ -12,28 +12,31 @@ class Disassembler:
             op_id, fmt, mask, code, args_struct = opcode_struct
 
             args: List[int] = []
-            # Ugly but works...
-            args_count = 0
-            arg_0, arg_1, arg_2 = 0, 0, 0
 
             if op & mask == code:
-                # if len(args_struct) == 2:
-                #     arg_0 = op & args_struct[0] >>
-                #     args_count+=1
+                # Switching arg masks. Order's very important !
                 for arg_mask in args_struct:
+
+                    # arg mask is 0b1111_0000_0000
                     if arg_mask & 0b1111_1111 == 0:
                         args.append((op & arg_mask) >> 8)
                         continue
 
-                    if arg_mask & 0b1111 == 0:
+                    # arg mask is 0b1111_0000
+                    if arg_mask & 0b1111_0000_1111 == 0:
                         args.append((op & arg_mask) >> 4)
+                        continue
+
+                    # arg_mask is 0b1111_1111 (i)
+                    if arg_mask & 0b1111_0000_0000 == 0:
+                        args.append((op & arg_mask))
                         continue
 
                 print(fmt % tuple(args))
 
                 if self.debug:
-                    if 0 <= op_id < len(abstract_table):
-                        print(abstract_table[op_id] % tuple(args))
+                    if min(abstract_table) <= op_id <= max(abstract_table):
+                        print(abstract_table[op_id].format(*args))
 
                 return op_id, args
         raise IndexError(f"Unknown OPCode : {op:02X}")

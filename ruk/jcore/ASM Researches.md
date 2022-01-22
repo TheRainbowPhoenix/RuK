@@ -7,10 +7,11 @@ Some searches about asm, made from binary rom
 - Args `n` and `m` can take from 3 to 4 bits.  
 - Args `d` and `i` can take up to 16 bits.
 
-## ADD
+## ADD #h'N
 ```
 0x71CC = add 0xCC, r1
 0x7201 = add 0x01, r2
+0x7401 = add 0x01, r4
 0x7 = ADD
 0x_N = register N
 0x__XX = value

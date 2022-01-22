@@ -27,13 +27,15 @@ class Memory:
         if 0 <= addr+2 <= len(self._mem):
             # TODO: endianness ?
             return self._mem[addr:addr+2]
+        raise IndexError(f'Out of bound read16 : \"{addr:04X}\"')
 
     def read32(self, addr) -> bytes:
         if 0 <= addr+4 <= len(self._mem):
             # TODO: endianness ?
             return self._mem[addr:addr+4]
+        raise IndexError(f'Out of bound read32 : \"{addr:04X}\"')
 
-    def write8(self, addr, val: bytes) -> bytes:
+    def write8(self, addr, val: int) -> int:
         self._mem[addr] = val
         return val
 
@@ -62,7 +64,7 @@ class MemoryMap:
         """
         Browse the memory map for the address.
         :param address:
-        :return: Memori
+        :return: Memory
         """
         for start in self._mem:
             mem = self._mem[start]
