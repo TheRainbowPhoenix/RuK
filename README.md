@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="" width="224px"/><!-- TODO: Cool Logo here !! --><br/>
+  <img src="docs/res/RuK.png" width="224px"/><br/>
   RuK
 </h1>
 <p align="center">A simple <b>SuperH Emulator</b> that aim to help understanding SH4.<br/><br/>
