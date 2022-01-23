@@ -1,5 +1,6 @@
 <h1 align="center">
-  <img src="docs/res/RuK.png" width="288px"/><br/>
+  <img src="docs/res/RuK.png#gh-light-mode-only" width="288px"/><br/>
+  <img src="docs/res/RuK_dark.png#gh-dark-mode-only" width="288px"/><br/>
 </h1>
 <p align="center">A simple <b>SuperH Emulator</b> that aim to help understanding SH4.<br/><br/>
 Some features like <b>LCD display</b> and <b>Touchscreen</b> are planned, aiming to provide a more native debugging experience !</p>
