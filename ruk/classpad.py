@@ -29,6 +29,10 @@ class Classpad:
         self._memory.add(0x8C00_0000, self._ram)
         self._memory.add(0x8000_0000, self._rom)
 
+    @property
+    def cpu(self):
+        return self._cpu
+
     def run(self):
         while not self._cpu.ebreak:
             try:

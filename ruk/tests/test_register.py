@@ -29,6 +29,9 @@ class TestRegister(TestCase):
     def test_str(self):
         self.assertIn("r15: FF", str(self.regs))
 
+    def test_len(self):
+        self.assertEqual(22, len(self.regs))
+
     @patch('builtins.print')
     def test_dump(self, mock_print):
         self.regs.dump()

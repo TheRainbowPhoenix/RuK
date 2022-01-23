@@ -99,6 +99,13 @@ class Register:
                 [f'{r:<4} = {self._regs[r]:02X}' + ('\t' if abs(self._regs[r]) <= 0xFF else '') for r in regs[-extra:]]) + '\n'
         )
 
+    def __len__(self):
+        return len(self._regs)
+
+    def __iter__(self):
+        for x in self._regs.__iter__():
+            yield x
+
 
 class CPU:
     """
