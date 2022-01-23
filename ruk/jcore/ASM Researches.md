@@ -62,7 +62,7 @@ MOV is related to length :
 ```
 0xE054 = mov #h'54, r0 ;
        = mov 0x54, r0 ;
-0xE1FF = mov 0xff, r1;
+0xE1FF = mov 0xFF, r1;
 
 0xE7FF = mov #h'FFFFFFFF, r7
 ```

@@ -6,7 +6,7 @@ from ruk.jcore.memory import Memory, MemoryMap
 class TestMemory(TestCase):
     def setUp(self) -> None:
         self.mem = Memory(0x800)
-        self.mem._mem[0x70:0x7F] = b'\xff' * 0xF
+        self.mem._mem[0x70:0x7F] = b'\xFF' * 0xF
 
         self.memmap = MemoryMap()
         self.memmap.add(0x800, self.mem)
@@ -27,7 +27,7 @@ class TestMemory(TestCase):
         self.assertEqual(self.mem.read16(0x7FE), b'\x00\x00')
         self.assertEqual(self.mem.read16(-1), b'')
 
-        self.assertEqual(self.mem.read16(0x70), b'\xff\xff')
+        self.assertEqual(self.mem.read16(0x70), b'\xFF\xFF')
 
 
         with self.assertRaises(IndexError):
@@ -41,7 +41,7 @@ class TestMemory(TestCase):
         self.assertEqual(self.mem.read32(0x7FC), b'\x00\x00\x00\x00')
         self.assertEqual(self.mem.read32(-1), b'')
 
-        self.assertEqual(self.mem.read32(0x70), b'\xff\xff\xff\xff')
+        self.assertEqual(self.mem.read32(0x70), b'\xFF\xFF\xFF\xFF')
 
 
         with self.assertRaises(IndexError):
@@ -84,8 +84,8 @@ class TestMemory(TestCase):
         with self.assertRaises(IndexError):
             self.memmap.read32(0x100)
 
-        self.assertEqual(self.memmap.read32(0x870), b'\xff\xff\xff\xff')
-        self.assertEqual(self.memmap.read16(0x870), b'\xff\xff')
+        self.assertEqual(self.memmap.read32(0x870), b'\xFF\xFF\xFF\xFF')
+        self.assertEqual(self.memmap.read16(0x870), b'\xFF\xFF')
 
         with self.assertRaises(IndexError):
             self.memmap.read16(0x1FFF)

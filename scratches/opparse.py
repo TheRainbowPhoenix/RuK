@@ -16,3 +16,6 @@ head_codes = [i[:4] for i in mask_mk]
 e = l.split("col_cont_2\">")
 mk = [i.split('</div>')[0] for i in e]
 mk = mk[1:]
+
+# Find an index:
+print(mk.index('bf	label'))

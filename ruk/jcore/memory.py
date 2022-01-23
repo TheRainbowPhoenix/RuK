@@ -81,7 +81,7 @@ class MemoryMap:
         # Can read 4bytes ?
         if address+3 <= start + len(mem):
             return mem.read32(address - start)
-        raise IndexError(f'Address overflow : {hex(address)}')
+        raise IndexError(f'Address overflow : {hex(address)}')   # pragma: no cover
 
     def read16(self, address: int):
         # try:
@@ -91,4 +91,4 @@ class MemoryMap:
         # Can read 4bytes ?
         if address+1 <= start + len(mem):
             return mem.read16(address - start)
-        raise IndexError(f'Address overflow : {hex(address)}')
+        raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover

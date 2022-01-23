@@ -92,11 +92,11 @@ class Register:
         extra = len(regs) % col
 
         print('\n'.join([
-            '\t'.join([f'{r:<4} = {self._regs[r]:02X}' + ('\t' if abs(self._regs[r]) <= 0xff else '') for r in i])
+            '\t'.join([f'{r:<4} = {self._regs[r]:02X}' + ('\t' if abs(self._regs[r]) <= 0xFF else '') for r in i])
             for i in zip(*[iter(regs)]*col)
         ]),
             end='\n' + '\t'.join(
-                [f'{r:<4} = {self._regs[r]:02X}' + ('\t' if abs(self._regs[r]) <= 0xff else '') for r in regs[-extra:]]) + '\n'
+                [f'{r:<4} = {self._regs[r]:02X}' + ('\t' if abs(self._regs[r]) <= 0xFF else '') for r in regs[-extra:]]) + '\n'
         )
 
 
@@ -132,3 +132,11 @@ class CPU:
         self.regs.dump()
         print(f"{'pc':<4} = {self.pc:02X}")
         self.ebreak = True
+
+    def delay_slot(self, addr: int):
+        if self.debug:
+            print(f"Delay_slot \"{addr:04X}\"")
+        pc = self.pc
+        self.pc = addr
+        self.step()
+        self.pc = pc

@@ -6,13 +6,13 @@ from ruk.jcore.cpu import Register
 class TestRegister(TestCase):
     def setUp(self) -> None:
         self.regs = Register()
-        self.regs._regs["r15"] = 0xff
+        self.regs._regs["r15"] = 0xFF
 
     def test_get(self):
         self.assertEqual(self.regs[0], 0)
         self.assertEqual(self.regs['r0'], 0)
-        self.assertEqual(self.regs[15], 0xff)
-        self.assertEqual(self.regs['r15'], 0xff)
+        self.assertEqual(self.regs[15], 0xFF)
+        self.assertEqual(self.regs['r15'], 0xFF)
 
         with self.assertRaises(IndexError):
             _ = self.regs['invalid']
