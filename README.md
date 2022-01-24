@@ -24,7 +24,7 @@ Support for binaries and custom ROM are planned.
 ## Using the GUI
 As RuK is reaching the V1.0, a cool GUI is now work in progress !
 
-![img.png](docs/res/img.png)
+![gui_pre_v1.png](docs/res/gui_pre_v1.png)
 
 This GUI make you able to both take a look at the assembly, and the registers values but also to edit the registers, in real time !
 Try to edit the `pc` register value while running the code, and you'll see te magic.
