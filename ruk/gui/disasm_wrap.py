@@ -137,7 +137,7 @@ class DisasmFrame(BaseFrame):
         self.refresh_asm()
 
     def move_cursor_to_line(self, addr_diff: int):
-        self._cursor_pos['y'] = 5 + (self.font_size + 6) * addr_diff
+        self._cursor_pos['y'] = 6 + (self.font_size + 6) * addr_diff
 
 # self.canvas = Canvas(root, width=800, height=650, bg = '#afeeee')
 # self.canvas.create_text(100,10,fill="darkblue",font="Times 20 italic bold",

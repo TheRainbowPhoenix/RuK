@@ -38,10 +38,14 @@ class RegisterWrapper(BaseWrapper):
         self.regEdit["justify"] = "left"
         self.regEdit.grid(row=0, column=1)
 
-        self.regEdit.bind("<FocusOut>", self._validate_change)
+        self.regEdit.bind("<FocusOut>", self._reg_edit_change)
 
     def update_values(self, step=False):
         value = self._ref[self.name]
+
+        if "invalid" in self.regEdit.state():
+            self.regEdit.state(["!invalid"])
+
         if value != self._value_cache:
             self._value_display = f'{hex(value)}'
             self._value_cache = value
@@ -59,13 +63,10 @@ class RegisterWrapper(BaseWrapper):
                 self.regEdit["font"] = self._font
                 self._value_changed = False
 
-            if self.regEdit.state() == "invalid":
-                self.regEdit.state([""])
-
     def _set_value(self, value: str, base: int = 16):
         try:
             intval = int(value, base)
-            self.regEdit.state([""])
+            self.regEdit.state(["!invalid"])
 
             self._ref[self.name] = intval
             self.update_values()
@@ -74,7 +75,7 @@ class RegisterWrapper(BaseWrapper):
         except ValueError as _:
             return False
 
-    def _validate_change(self, *_):
+    def _validate_change(self):
         """
         Validate input register value
         """
@@ -97,7 +98,14 @@ class RegisterWrapper(BaseWrapper):
             ) and self._set_value(value=val, base=16):
                 return
 
+        self._value_cache = None
         self.regEdit.state(["invalid"])
+
+    def do_validate(self):
+        self._validate_change()
+
+    def _reg_edit_change(self, *_):
+        self.do_validate()
 
 
 class RegisterFrame(BaseFrame):
