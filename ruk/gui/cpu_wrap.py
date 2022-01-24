@@ -7,9 +7,10 @@ from tkinter import ttk
 from typing import Dict
 import re
 
+from ruk.gui.preferences import Preferences
 from ruk.gui.widgets.base import BaseWrapper, BaseFrame
 from ruk.gui.widgets.flex import FlexGrid
-from ruk.jcore.cpu import Register
+from ruk.jcore.cpu import Register, CPU
 
 PLATFORM = sys.platform
 
@@ -25,7 +26,7 @@ class RegisterWrapper(BaseWrapper):
         self._value_changed = False
 
     def set_widget(self, frame: tk.Frame):
-        self.regLabel = ttk.Label(frame)
+        self.regLabel = ttk.Label(frame, width=4)
         self.regLabel["text"] = f"{self.name}"
         self.regLabel["justify"] = "right"
         self.regLabel["font"] = self._font
@@ -100,8 +101,9 @@ class RegisterWrapper(BaseWrapper):
 
 
 class RegisterFrame(BaseFrame):
-    def __init__(self, registers: Register, **kw):
-        self._regs = registers
+    def __init__(self, cpu: CPU, **kw):
+        self._regs = cpu.regs
+        self._pc = cpu.reg_pc
         self.regs_wrapper: Dict[str, RegisterWrapper] = {}
 
     def set_widgets(self, root):
@@ -112,6 +114,25 @@ class RegisterFrame(BaseFrame):
 
         # TODO: remove me !
         self._test_buttons(root)
+
+    items_per_col = 12
+
+    def _create_register(self, reg, i):
+        frame = tk.Frame(
+            master=self.regFrame,
+            relief=tk.FLAT,
+            borderwidth=0,
+            padx=10,
+            pady=4,
+        )
+        col = 1 if i >= self.items_per_col else 0
+        row = i if i < self.items_per_col else i - self.items_per_col
+
+        frame.grid(row=row, column=col)
+
+        reg_wrap = RegisterWrapper(reg, self._regs)
+        reg_wrap.set_widget(frame)
+        self.regs_wrapper[reg] = reg_wrap
 
     def _setup_registers(self, root: tk.Frame):
         """
@@ -124,25 +145,30 @@ class RegisterFrame(BaseFrame):
 
         i = 0
         for reg in self._regs:
-            frame = tk.Frame(
-                master=self.regFrame,
-                relief=tk.FLAT,
-                borderwidth=0,
-                padx=10,
-                pady=4,
-            )
-            col = 1 if i >= items_per_col else 0
-            row = i if i < items_per_col else i - items_per_col
-
-            frame.grid(row=row, column=col)
-
-            reg_wrap = RegisterWrapper(reg, self._regs)
-            reg_wrap.set_widget(frame)
-            self.regs_wrapper[reg] = reg_wrap
-
+            self._create_register(reg, i)
             i += 1
 
+        self._setup_pc(i)
+        i += 1
+
         self.regFrame.pack(fill=tk.BOTH, side=tk.TOP, expand=True, padx=10, pady=10)
+
+    def _setup_pc(self, index: int):
+        frame = tk.Frame(
+            master=self.regFrame,
+            relief=tk.FLAT,
+            borderwidth=0,
+            padx=10,
+            pady=4,
+        )
+        col = 1 if index >= self.items_per_col else 0
+        row = index if index < self.items_per_col else index - self.items_per_col
+
+        frame.grid(row=row, column=col)
+
+        reg_wrap = RegisterWrapper('pc', self._pc)
+        reg_wrap.set_widget(frame)
+        self.regs_wrapper['pc'] = reg_wrap
 
     def _test_buttons(self, root: tk.Frame):
         """

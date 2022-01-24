@@ -52,6 +52,9 @@ class Memory:
     def __len__(self):
         return len(self._mem)
 
+    def get_range(self, start: int, end: int):
+        return self._mem[start:end]
+
 
 class MemoryMap:
     def __init__(self):
@@ -92,3 +95,36 @@ class MemoryMap:
         if address+1 <= start + len(mem):
             return mem.read16(address - start)
         raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover
+
+    def get_arround(self, address: int, size: int):
+        """
+        Get memory around address
+        :param address: Memory address to seek at
+        :param size: relative size to get bytes, eg 5 will get 5 bytes before address and 5 bytes after.
+        """
+        mem, start = self.resolve(address)
+
+        start_p = address - size
+        end_p = address + size
+
+        if end_p <= start or start_p >= start + len(mem):
+            raise IndexError(f'Reading out of memory bounds : {hex(address)} +- {size}')
+
+        # Case where we start at the end :
+        if end_p >= start + len(mem):
+            diff = end_p - (start + len(mem))
+            start_p -= diff
+            end_p -= diff
+
+        if start <= start_p and end_p <= start + len(mem):
+            return start_p, end_p, mem.get_range(start_p-start, end_p-start)
+
+        if start_p < start:
+            start_p = start
+            end_p = start+size*2
+            return start_p, end_p, mem.get_range(0, size*2)
+
+        # TODO: if at end, etc
+        raise IndexError(f"Edge case not handled : {start_p} {end_p}")
+        # return start_p, end_p, b'\x0f'*(size*2)
+

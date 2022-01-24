@@ -29,7 +29,6 @@ class TestMemory(TestCase):
 
         self.assertEqual(self.mem.read16(0x70), b'\xFF\xFF')
 
-
         with self.assertRaises(IndexError):
             self.mem.read16(0x800)
 
@@ -42,7 +41,6 @@ class TestMemory(TestCase):
         self.assertEqual(self.mem.read32(-1), b'')
 
         self.assertEqual(self.mem.read32(0x70), b'\xFF\xFF\xFF\xFF')
-
 
         with self.assertRaises(IndexError):
             self.mem.read32(0x800)
@@ -71,6 +69,12 @@ class TestMemory(TestCase):
         self.assertEqual(self.mem[0:2], b'\xde\xad')
         self.assertEqual(self.mem[2:4], b'\xbe\xef')
 
+    def test_get_range(self):
+        self.assertEqual(self.mem.get_range(2, 6), b'\x00\x00\x00\x00')
+        self.mem.write_bin(4, b'\xde\xad\xbe\xef')
+        self.assertEqual(self.mem.get_range(2, 6), b'\x00\x00\xde\xad')
+        self.assertEqual(self.mem.get_range(6, 10), b'\xbe\xef\x00\x00')
+
     def test_resolve(self):
         with self.assertRaises(IndexError):
             self.memmap.resolve(0x100)
@@ -92,3 +96,14 @@ class TestMemory(TestCase):
 
         with self.assertRaises(IndexError):
             self.memmap.read32(0x1FFD)
+
+    def test_get_arround(self):
+        with self.assertRaises(IndexError):
+            self.memmap.get_arround(0x100, 2)
+
+        with self.assertRaises(IndexError):
+            self.memmap.get_arround(0x1001, 2)
+
+        self.assertEqual(self.memmap.get_arround(0x870, 2), (0x86e, 0x86e+2*2, b'\x00\x00\xFF\xFF'))
+        self.assertEqual(self.memmap.get_arround(0x800, 2), (0x800, 0x800+2*2, b'\x00\x00\x00\x00'))
+        self.assertEqual(self.memmap.get_arround(0x1000, 2), (0x1000-2*2, 0x1000, b'\x00\x00\x00\x00'))

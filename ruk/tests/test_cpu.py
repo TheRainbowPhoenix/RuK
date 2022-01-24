@@ -21,10 +21,12 @@ class TestCPU(TestCase):
         memory.add(0x8C00, self.ram)
         memory.add(0x8000, self.rom)
 
-        # memory.add(0x8?00_0000, ScreenIO)
-        cpu = CPU(memory, start_pc=0x8000, debug=False)
+        self.start_pc = 0x8000
 
-        self.cpu = CPU(memory, start_pc=0x8000, debug=False)
+        # memory.add(0x8?00_0000, ScreenIO)
+        cpu = CPU(memory, start_pc=self.start_pc, debug=False)
+
+        self.cpu = CPU(memory, start_pc=self.start_pc, debug=False)
 
     def test_pc(self):
         self.assertEqual(self.cpu.pc, 0x8000)
@@ -126,6 +128,24 @@ class TestCPU(TestCase):
         self.assertEqual(self.cpu.regs[0], 0x3)
         mock_print.assert_called_with('mov r4, r0')
 
+    def test_reset(self):
+        self.cpu.pc = 0xdeadbeef
+        self.cpu.regs[15] = 0xff
+        self.cpu.ebreak = True
+
+        self.cpu.reset()
+
+        self.assertEqual(self.cpu.pc, self.start_pc)
+        self.assertEqual(self.cpu.regs[15], 0)
+        self.assertEqual(self.cpu.ebreak, False)
+
+    def test_surrounding_memory(self):
+        self.assertEqual(self.cpu.get_surrounding_memory(4), (self.cpu.pc, self.cpu.pc+8, b'\x6E\xF3\x6E\x13\x6A\x13\x6F\x13'))
+
+    def test_reg_pc(self):
+        self.assertEqual(self.cpu.reg_pc['pc'], self.cpu.pc)
+        self.cpu.reg_pc['pc'] = 0xdeadbeef
+        self.assertEqual(self.cpu.pc, 0xdeadbeef)
 
     def test_errors(self):
         raw_asm = b'\xFF\xFF'  # That should be illegal according to Renesas

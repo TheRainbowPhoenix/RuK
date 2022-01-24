@@ -32,6 +32,16 @@ class TestRegister(TestCase):
     def test_len(self):
         self.assertEqual(22, len(self.regs))
 
+    def test_reset(self):
+        self.regs[0] = 15
+        self.regs[5] = 5
+        self.regs.reset()
+        self.assertEqual(self.regs[0], 0)
+        self.assertEqual(self.regs[5], 0)
+
+    def test_iter(self):
+        self.assertIn('r5', list(self.regs))
+
     @patch('builtins.print')
     def test_dump(self, mock_print):
         self.regs.dump()

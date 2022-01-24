@@ -106,6 +106,27 @@ class Register:
         for x in self._regs.__iter__():
             yield x
 
+    def reset(self):
+        """
+        Perform CPU reset
+        """
+        for reg in self._regs:
+            self._regs[reg] = 0x0
+
+
+class PCWrapper:
+    """
+    PC register wrapper for display
+    """
+    def __init__(self, parent: 'CPU'):
+        self.parent = parent
+
+    def __getitem__(self, item):
+        return self.parent.pc
+
+    def __setitem__(self, key, value: int):
+        self.parent.pc = value
+
 
 class CPU:
     """
@@ -115,11 +136,19 @@ class CPU:
         self.ebreak = False
         self.debug = debug
         self.pc = start_pc
+        self._start_pc = start_pc
+        self._pc_wrap = PCWrapper(self)
 
         self.mem = mem
         self.regs = Register()
         self.emulator = Emulator(self)
         self.disassembler = Disassembler(debug=debug)
+
+        self.delay_slot_flag = False
+
+    @property
+    def reg_pc(self):
+        return self._pc_wrap
 
     def step(self):
         try:
@@ -147,3 +176,11 @@ class CPU:
         self.pc = addr
         self.step()
         self.pc = pc
+
+    def get_surrounding_memory(self, size=40):
+        return self.mem.get_arround(self.pc, size)
+
+    def reset(self):
+        self.pc = self._start_pc
+        self.regs.reset()
+        self.ebreak = False

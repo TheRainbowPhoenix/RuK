@@ -7,10 +7,12 @@ from tkinter import ttk
 from typing import Dict, Callable
 import re
 
+from ruk.gui.preferences import Preferences
 from ruk.gui.resources import ResourceManager
 from ruk.gui.widgets.base import BaseWrapper, BaseFrame
 from ruk.gui.widgets.utils import HookToolTip
 from ruk.jcore.cpu import CPU
+
 
 class ControlsFrame(BaseFrame):
     def __init__(self, cpu: CPU, resources: ResourceManager, **kw):
@@ -29,7 +31,7 @@ class ControlsFrame(BaseFrame):
             pass
 
         self.on_step_callback: Callable = noop
-
+        self.on_stop_callback: Callable = noop
 
     def set_widgets(self, root):
         """
@@ -52,6 +54,7 @@ class ControlsFrame(BaseFrame):
             image=self.resources['stop'],
             width=28,
             style="Titlebar.TButton",
+            command=self.do_stop
         )
         HookToolTip(self.stop_btn, "Stop")
 
@@ -107,7 +110,6 @@ class ControlsFrame(BaseFrame):
         self.except_pause_btn.grid(row=0, column=col, padx=2)
         col += 1
 
-
     def continue_until_changed(self):
         if self.continue_until_mode == 1:
             self.continue_until_mode = 0
@@ -144,6 +146,10 @@ class ControlsFrame(BaseFrame):
     def do_run(self):
         while not self._cpu.ebreak:
             self.do_step()
+
+    def do_stop(self):
+        self._cpu.reset()
+        self.on_stop_callback()
 
     def hook(self, root: tk.Frame):
         self.set_widgets(root)
