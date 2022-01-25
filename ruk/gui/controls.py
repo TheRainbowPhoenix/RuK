@@ -16,6 +16,7 @@ from ruk.jcore.cpu import CPU
 
 class ControlsFrame(BaseFrame):
     def __init__(self, cpu: CPU, resources: ResourceManager, **kw):
+        super().__init__()
         self._cpu = cpu
         self.resources = resources
 

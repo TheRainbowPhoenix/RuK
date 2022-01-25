@@ -75,6 +75,7 @@ class DebuggerWindow(object):
         asm_frame = tk.Frame(master=self.root, width=600, height=650, bd=0)
         self.asm_view = DisasmFrame(self._cp.cpu, self.resources)
         self.asm_view.hook(asm_frame)
+        self.asm_view.set_refresh_callback(self.refresh_all)
         asm_frame.pack(fill=tk.BOTH, side=tk.LEFT, expand=True, anchor=tk.CENTER)
 
         """

@@ -1,4 +1,5 @@
 import tkinter as tk
+from typing import Callable
 
 
 class BaseWrapper(object):
@@ -10,8 +11,16 @@ class BaseWrapper(object):
 
 
 class BaseFrame(object):
+    def __init__(self):
+        def noop():
+            pass
+        self._refresh_callback = noop()
+
     def refresh(self):
         raise NotImplementedError
 
     def hook(self, root: tk.Frame):
         raise NotImplementedError
+
+    def set_refresh_callback(self, call: Callable):
+        self._refresh_callback = call

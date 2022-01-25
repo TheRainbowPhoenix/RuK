@@ -59,7 +59,7 @@ opcodes_table: List[Tuple[int, str, int, int, Tuple[int, ...]]] = [
     ),
 
     (
-        149, "bf %04x",
+        149, "bf 0x%04x",
         0b1111_1111_0000_0000,
         0b1000_1011_0000_0000,
         (

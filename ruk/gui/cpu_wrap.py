@@ -110,6 +110,7 @@ class RegisterWrapper(BaseWrapper):
 
 class RegisterFrame(BaseFrame):
     def __init__(self, cpu: CPU, **kw):
+        super().__init__()
         self._regs = cpu.regs
         self._pc = cpu.reg_pc
         self.regs_wrapper: Dict[str, RegisterWrapper] = {}

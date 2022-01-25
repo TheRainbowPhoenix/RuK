@@ -65,3 +65,12 @@ class HookToolTip(object):
         self.tw = None
         if tw:
             tw.destroy()
+
+def to_clip(data: str):
+    r = tk.Tk()
+    r.withdraw()
+    r.clipboard_clear()
+    r.clipboard_append(data)
+    r.update()  # now it stays on the clipboard after the window is closed
+    r.destroy()
+
