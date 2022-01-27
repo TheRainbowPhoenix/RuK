@@ -23,7 +23,7 @@ def line_y(pos: int) -> int:
 
 
 class LineWrapper:
-    def __init__(self, canvas: tk.Canvas):
+    def __init__(self, canvas: tk.Canvas, gutter_size: int):
         self.canvas = canvas
 
         self.addr_var: tk.StringVar = tk.StringVar(value='---')
@@ -36,6 +36,8 @@ class LineWrapper:
         self.var_id: int = -1
         self.text_id: int = -1
 
+        self._gutter_size = gutter_size
+
         self._changes: List[bool] = [False, False, False, False]
         self._colors_changes: List[bool] = [False, False, False, False]
         self._colors: List[str] = [
@@ -47,11 +49,18 @@ class LineWrapper:
 
         self._items: List[Tuple[int, tk.StringVar]] = []
 
+        self._x_pos_factor = [
+            0,
+            8,
+            6,
+            12,
+        ]
+
     def setup(self, index: int):
         from ruk.gui.preferences import preferences
         sz = preferences.current_font.size
 
-        x = max(sz // 2, 18)
+        x = max(sz // 2, self._gutter_size + 8)
         dy = max(sz // 2, 6)
         self.addr_id = self.canvas.create_text(x,
                                                line_y(index),
@@ -60,7 +69,7 @@ class LineWrapper:
                                                anchor=tk.NW,
                                                text=self.addr_var.get())
 
-        x += (sz * 8)
+        x += (sz * self._x_pos_factor[1])
         self.op_id = self.canvas.create_text(x,
                                              line_y(index),
                                              fill=self._colors[1],
@@ -68,7 +77,7 @@ class LineWrapper:
                                              anchor=tk.NW,
                                              text=self.op_var.get())
 
-        x += (sz * 6)
+        x += (sz * self._x_pos_factor[2])
         self.var_id = self.canvas.create_text(x,
                                               line_y(index),
                                               fill=self._colors[2],
@@ -76,7 +85,7 @@ class LineWrapper:
                                               anchor=tk.NW,
                                               text=self.var_var.get())
 
-        x += (sz * 12)
+        x += (sz * self._x_pos_factor[3])
         self.text_id = self.canvas.create_text(x,
                                                line_y(index),
                                                fill=self._colors[3],
@@ -127,6 +136,23 @@ class LineWrapper:
     def __str__(self):
         return f"{self.addr_var.get()} {self.op_var.get():<8} {self.var_var.get():<12} {self.text_var.get()}"
 
+    def set_gutter_size(self, size: int):
+        self._gutter_size = size
+
+        self._refresh_x_coords()
+
+    def _refresh_x_coords(self):
+        sz = preferences.current_font.size
+        x = max(sz // 2, self._gutter_size + 8)
+
+        for i in range(len(self._items)):
+            x += (sz * self._x_pos_factor[i])
+            self.canvas.coords(
+                self._items[i][0],
+                x,
+                self.canvas.coords(self._items[i][0])[1]
+            )
+
 
 class DisasmFrame(BaseFrame):
     BUF_SIZE = 64
@@ -165,12 +191,27 @@ class DisasmFrame(BaseFrame):
         }
         self.line_size = 0
 
+        self.gutter_size = preferences.get("gutter_size", 32)
+        self.gutter = -1
+
+        # Scroll top position
+        self._scroll_top = 0
+
+        self._arrows = []
+        self._arrows_memo = []
+
+        self._changes = {
+            'gutter_size': False,
+            'cursor': False,
+            'drag': False,
+        }
+
     def refresh(self):
         self.refresh_asm()
 
     def get_line_from_y(self, y: int):
         start = max(preferences.current_font.size // 2, 6)
-        pos = int(abs(y/line_height() - start/line_height()))
+        pos = int(abs((y + self._scroll_top) / line_height() - start / line_height()))
         return pos
 
     def do_click(self, event):
@@ -178,7 +219,6 @@ class DisasmFrame(BaseFrame):
         self._cursors['select']['line'] = line
         self.move_cursor_to_line(line, self._cursors['select'])
         self.refresh_cusor()
-
 
     def do_context_menu(self, event):
         line = self.get_line_from_y(event.y)
@@ -191,7 +231,6 @@ class DisasmFrame(BaseFrame):
         finally:
             self._context_menu.grab_release()
 
-
     def set_widgets(self, root):
         """
         Setup base widgets
@@ -199,20 +238,27 @@ class DisasmFrame(BaseFrame):
         widget = tk.Frame(root, bd=0)
         widget.pack(fill='both', expand=1)
 
-        self.canvas = tk.Canvas(widget, width=600, height=650, bg=preferences.current_theme.gui_background,
-                                highlightthickness=0)
+        sz = preferences.current_font.size
+
+        self._canvas_max_height = line_y(self.BUF_SIZE+4)
+        self.canvas = tk.Canvas(widget, width=600, height=650,
+                                bg=preferences.current_theme.gui_background,
+                                highlightthickness=0,
+                                scrollregion=(0,0,600,self._canvas_max_height))
         self.canvas.pack(fill='both', expand=1)
         self._setup_text()
 
         self._setup_ux(root)
 
+    CURSOR_FILL_HEIGHT = 4500
+
     def _setup_text(self):
-        CURSOR_FILL_HEIGHT = 4500
+
         # Create it hidden !
         self._cursors['select']['ref'] = self.canvas.create_rectangle(
             self._cursors['select']['pos']['x'],
             self._cursors['select']['pos']['y'],
-            self._cursors['select']['pos']['x'] + CURSOR_FILL_HEIGHT,
+            self._cursors['select']['pos']['x'] + self.CURSOR_FILL_HEIGHT,
             self._cursors['select']['pos']['y'] + line_height(),
             fill=preferences.current_theme.line_highlight, outline="")
 
@@ -220,15 +266,22 @@ class DisasmFrame(BaseFrame):
         self._cursors['pc']['ref'] = self.canvas.create_rectangle(
             self._cursors['pc']['pos']['x'],
             self._cursors['pc']['pos']['y'],
-            self._cursors['pc']['pos']['x'] + CURSOR_FILL_HEIGHT,
+            self._cursors['pc']['pos']['x'] + self.CURSOR_FILL_HEIGHT,
             self._cursors['pc']['pos']['y'] + line_height(),
             fill=preferences.current_theme.highlight_PC, outline="")
 
         for i in range(self.BUF_SIZE):
-            line = LineWrapper(canvas=self.canvas)
+            line = LineWrapper(canvas=self.canvas, gutter_size=self.gutter_size)
             line.setup(i)
 
             self._buffer.append(line)
+
+        self.gutter = self.canvas.create_rectangle(
+            self.gutter_size,
+            0,
+            self.gutter_size + 1,
+            self.CURSOR_FILL_HEIGHT,
+            fill=preferences.current_theme.line_highlight, outline="")
 
     def _setup_ux(self, root):
         self.canvas.bind("<Button-1>", self.do_click)
@@ -237,6 +290,8 @@ class DisasmFrame(BaseFrame):
         root.bind_all("<Control-Shift-c>", lambda x: self.do_copy_address())
         root.bind_all("<Control-Shift-C>", lambda x: self.do_copy_address())
         root.bind_all("<MouseWheel>", self.do_mousewheel)
+        root.bind_all("<Motion>", self.do_motion)
+        root.bind_all("<B1-Motion>", self.do_b1_motion)
 
         self._setup_context_menu(root)
 
@@ -275,6 +330,13 @@ class DisasmFrame(BaseFrame):
             print(f"Set PC error : {e}")
             return
 
+    def do_memory_edit(self):
+        # TODO: finish this...
+        from ruk.gui.dialogs import EditBytesDialog
+
+        edit_dialog = EditBytesDialog(0)
+        edit_dialog.show()
+
     def _setup_context_menu(self, root):
         # TODO: custom menu, remove the border...
         self._context_menu = tk.Menu(root, tearoff=0)
@@ -295,7 +357,8 @@ class DisasmFrame(BaseFrame):
 
         self._context_menu.add_command(label="Edit Instruction...", state=tk.DISABLED)
         self._context_menu.add_command(label="NOP Instruction", state=tk.DISABLED)
-        self._context_menu.add_command(label="Edit bytes...", state=tk.DISABLED)
+        self._context_menu.add_command(label="Edit bytes...", underline=0,
+                                       command=self.do_memory_edit)
 
     def refresh_cusor(self):
         self.canvas.coords(self._cursors['pc']['ref'],
@@ -303,25 +366,39 @@ class DisasmFrame(BaseFrame):
                            self._cursors['pc']['pos']['y'],
                            self._cursors['pc']['pos']['x'] + 4500,
                            self._cursors['pc']['pos']['y'] + line_height()
-       )
+                           )
 
         self.canvas.coords(self._cursors['select']['ref'],
                            self._cursors['select']['pos']['x'],
                            self._cursors['select']['pos']['y'],
                            self._cursors['select']['pos']['x'] + 4500,
                            self._cursors['select']['pos']['y'] + line_height()
-       )
+                           )
+
+    def refresh_gutter(self):
+        self.canvas.coords(
+            self.gutter,
+            self.gutter_size,
+            0,
+            self.gutter_size + 1,
+            self.CURSOR_FILL_HEIGHT)
+        self.draw_arrows()
 
     def refresh_display(self):
         for line in self._buffer:
             line.update_values()
+            if self._changes['gutter_size']:
+                line.set_gutter_size(self.gutter_size)
 
+        self.refresh_gutter()
         self.refresh_cusor()
 
     def refresh_asm(self):
         # First get the memory
 
         line = ""
+
+        self._arrows = []
 
         try:
             start_p, end_p, mem = self._cpu.get_surrounding_memory()
@@ -358,6 +435,9 @@ class DisasmFrame(BaseFrame):
                         args[0] * 2 +  # Jump of N bytes
                         4
                     )
+
+                    self.queue_arrow(index, args[0] + 2)
+
                 else:
                     var_str = ' '.join(ops[1:]) if len(ops) > 1 else ''
                 # text_str += 'pseudocode'
@@ -421,9 +501,98 @@ class DisasmFrame(BaseFrame):
 
         cursor['pos']['y'] = max(sz // 2, 6) + (sz + max(sz // 2, 6)) * addr_diff
 
+    def queue_arrow(self, start: int, size: int):
+        self._arrows.append([-1, start, size])
+
+    def draw_arrows(self):
+        self.clear_arrows()
+
+        width = preferences.get("lines_width", 1)
+        spacing = preferences.get("arrow_spacing", 2)
+        spacing_start = preferences.get("arrow_spacing_start", 2)
+
+        starting_pos = []
+        starting_pos_x = {}
+        ending_pos = []
+        ending_pos_x = {}
+
+        for index in range(len(self._arrows)):
+            x = self.gutter_size - ((index + 1) * spacing * 2 * width) - spacing_start
+            start = line_y(self._arrows[index][1]) + line_height() // 2
+            end = line_y(self._arrows[index][1] + self._arrows[index][2] + 1) - line_height() // 2
+
+            self._arrows[index][0] = self.canvas.create_line(
+                x,
+                start,
+                x,
+                end,
+                width=width,
+                fill=preferences.current_theme.flow)
+
+            if start not in starting_pos:
+                starting_pos.append(start)
+                starting_pos_x[start] = x
+            else:
+                starting_pos_x[start] = min(x, starting_pos_x[start])
+            if end not in ending_pos:
+                ending_pos.append(end)
+                ending_pos_x[end] = x
+            else:
+                ending_pos_x[end] = min(x, ending_pos_x[end])
+
+            self._arrows_memo.append(self._arrows[index])
+
+        for pos in starting_pos:
+            arrow_start = self.canvas.create_line(
+                starting_pos_x[pos],
+                pos,
+                self.gutter_size - 1,
+                pos,
+                width=width,
+                fill=preferences.current_theme.flow)
+            self._arrows_memo.append((arrow_start,))
+
+        for pos in ending_pos:
+            arrow_end = self.canvas.create_line(
+                ending_pos_x[pos],
+                pos,
+                self.gutter_size - 1,
+                pos,
+                width=width,
+                fill=preferences.current_theme.flow,
+                arrow=tk.LAST)
+            self._arrows_memo.append((arrow_end,))
+
+    def clear_arrows(self):
+        for index in range(len(self._arrows_memo)):
+            self.canvas.delete(self._arrows_memo[index][0])
+        self._arrows_memo = []
 
     # Mouse scroll stuff !
     def do_mousewheel(self, event):
+        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        self._scroll_top = round(self._canvas_max_height * self.canvas.yview()[0])
+        # todo: fetch older / newer ??
+
+    def do_motion(self, e):
+        sensibility = 2
+        if e.x - sensibility <= self.gutter_size <= e.x + sensibility:
+            self.canvas.config(cursor="sizing")
+            self._changes['cursor'] = True
+            self._changes['drag'] = True
+        else:
+            if self._changes['cursor']:
+                self.canvas.config(cursor="")
+                self._changes['drag'] = False
         pass
-        # TODO: this is fake scroll !
-        # self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    MIN_GUTTER_SIZE = 8
+    MAX_GUTTER_SIZE = 500
+
+    def do_b1_motion(self, e):
+        if self._changes['drag']:
+            x = e.x
+            if self.MIN_GUTTER_SIZE < x <= self.MAX_GUTTER_SIZE:
+                self._changes['gutter_size'] = True
+                self.gutter_size = x
+                self.refresh_display()

@@ -177,8 +177,10 @@ class CPU:
         self.step()
         self.pc = pc
 
-    def get_surrounding_memory(self, size=40):
-        return self.mem.get_arround(self.pc, size)
+    def get_surrounding_memory(self, pc=None, size=40):
+        if pc == None:
+            pc = self.pc
+        return self.mem.get_arround(pc, size)
 
     def reset(self):
         self.pc = self._start_pc

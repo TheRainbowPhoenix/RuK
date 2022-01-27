@@ -11,7 +11,11 @@ _default_conf = {
     "tooltip_dark": {
         "bg": "#1D1D1D",
         "background": "#272727",
-    }
+    },
+    "lines_width": 1,
+    "arrow_spacing": 3,
+    "arrow_spacing_start": 8,
+    "gutter_size": 54,
 }
 
 _default_theme = {
@@ -36,6 +40,7 @@ _default_theme = {
     "ec ucall": '#5ccfe6',
     "ec ujmp": '#c2d94c',
     "ec usrcmt": '#fa6e32',
+    "ec flow": '#c2d94c',
     "#~highlightPC": '#571a07',
     "#~lineHighlight": '#2B2B2B',  # '#1B1B1B', if you want darker
 }
@@ -107,6 +112,10 @@ class ColorTheme(DictWrapper):
     @property
     def trap(self):
         return self._values["ec trap"]
+
+    @property
+    def flow(self):
+        return self._values["ec flow"]
 
     @property
     def gui_background(self):

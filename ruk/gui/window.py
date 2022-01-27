@@ -19,30 +19,39 @@ if typing.TYPE_CHECKING:  # pragma: no cover
 PLATFORM = sys.platform
 
 
-class DebuggerWindow(object):
-    def __init__(self, **kw):
+class BaseWindow(object):
+    def __init__(self, title: str = "Unnamed window"):
         root = tk.Tk()
-
         self.root = root
-        self.root.title("RuK - Debugger")
+        self.root.title(title)
+
         self.root.resizable(True, True)
 
         self.preferences: Preferences = preferences
 
+        self.resources: ResourceManager = ResourceManager(self.root)
+
+        self.screensize = (800, 600)
+
+        self.set_theme()
+
+    def win32_fixes(self):
         if "win" in PLATFORM:
             app_id = u'local.konshin.phoebe.RuK'
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
 
-            self.root.iconbitmap(os.path.join(os.path.dirname(os.path.abspath(__file__)), "res/RuK.ico"))
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)  # if your windows version >= 8.1
+            except:
+                try:
+                    ctypes.windll.user32.SetProcessDPIAware()  # Before Windows 8.1
+                except:
+                    pass  # Windows 7 or before
 
-
-        self.resources: ResourceManager = ResourceManager(self.root)
-
-        self.set_theme()
-        self.frames: typing.List[BaseFrame] = []
-
-        self._cp: Classpad = None
+            try:
+                self.screensize = [ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1)]
+            except:
+                pass
 
     def set_theme(self):
         """
@@ -56,7 +65,29 @@ class DebuggerWindow(object):
         self.resources.load()
 
     def show(self):
+        self.root.update_idletasks()
+
+        if "win" in PLATFORM:
+            self.root.iconbitmap(os.path.join(os.path.dirname(os.path.abspath(__file__)), "res/RuK.ico"))
+            self.win32_fixes()
+        else:
+            self.screensize = (self.root.winfo_screenwidth(), self.root.winfo_screenheight())
+
+        xp = (self.screensize[0] // 2) - (self.root.winfo_width() // 2)
+        yp = (self.screensize[1] // 2) - (self.root.winfo_height() // 2)
+        geom = (self.root.winfo_width(), self.root.winfo_height(), xp, yp)
+        self.root.geometry('{0}x{1}+{2}+{3}'.format(*geom))
+
         self.root.mainloop()
+
+
+class DebuggerWindow(BaseWindow):
+    def __init__(self, **kw):
+        super().__init__("RuK - Debugger")
+
+        self.frames: typing.List[BaseFrame] = []
+
+        self._cp: Classpad = None
 
     def setup_workspace(self):
         """
@@ -88,7 +119,6 @@ class DebuggerWindow(object):
         self.frames.append(self.reg_ctrl_frame)
 
         regs_frame.pack(fill=tk.BOTH, side=tk.RIGHT, expand=False, anchor=tk.SE)
-
 
     def refresh_all(self):
         for frame in self.frames:

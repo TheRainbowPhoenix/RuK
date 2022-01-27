@@ -29,8 +29,7 @@ You can test it right away :
 ````
 python3 test_gui.py
 ````
-
-![gui_pre_v1-2.png](docs/res/gui_pre_v1-2.png)
+![gui_pre_v1-3.png](docs/res/gui_pre_v1-3.png)
 
 This GUI make you able to both take a look at the assembly, and the registers values but also to edit the registers, in real time !
 Try to edit the `pc` register value while running the code, and you'll see te magic.
