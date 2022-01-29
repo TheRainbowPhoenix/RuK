@@ -2,7 +2,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from ruk.jcore.cpu import CPU
-from ruk.jcore.emulator import Emulator
+from ruk.jcore.emulator import Emulator  # generated_
 
 
 class TestEmulator(TestCase):
@@ -70,6 +70,17 @@ class TestEmulator(TestCase):
 
         # pc = 2, disp = 1, expect 2 + 4 + (disp << 1) = 2 + 6 = 8
         self.assertEqual(self.emu.cpu.pc, 8)
+
+    def test_bra(self):
+        self.emu.cpu.regs['sr'] = 1
+        self.emu.cpu.regs['pc'] = 0x80
+        self.emu.cpu.pc = self.emu.cpu.regs['pc']
+        disp = 1
+        self.emu.bra(disp)
+
+        self.emu.cpu.delay_slot.assert_called_once()
+        self.emu.cpu.delay_slot.assert_called_with(0x80 + 2)
+        self.assertEqual(self.emu.cpu.pc, 0x80 + 4 + disp*2)
 
     def test_rts(self):
         self.emu.cpu.pc = 40

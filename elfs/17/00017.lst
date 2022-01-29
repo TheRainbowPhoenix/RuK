@@ -1,0 +1,139 @@
+SH SERIES C/C++ Compiler (Ver. 6.0C)                                                                 28-Jan-2022 18:03:59  PAGE    1
+
+************ OBJECT LISTING ************
+
+FILE NAME: tests\00017.c
+
+
+SCT OFFSET   CODE       C LABEL     INSTRUCTION OPERAND    COMMENT
+
+         00017.c     1    int
+         00017.c     2    main()
+P   00000000              _main:                           ; function: main
+                                                           ; frame size=8
+    00000000 7FF8                   ADD         #-8,R15
+         00017.c     3    {
+         00017.c     4            struct { int x; int y; } s;
+         00017.c     5            
+         00017.c     6            s.x = 3;
+    00000002 64F3                   MOV         R15,R4
+         00017.c     7            s.y = 5;
+    00000004 E205                   MOV         #5,R2
+    00000006 E303                   MOV         #3,R3
+    00000008 2432                   MOV.L       R3,@R4
+    0000000A 1421                   MOV.L       R2,@(4,R4)
+         00017.c     8            return s.y - s.x - 2; 
+    0000000C 6042                   MOV.L       @R4,R0
+    0000000E 600B                   NEG         R0,R0
+    00000010 7003                   ADD         #3,R0
+         00017.c     9    }
+    00000012 000B                   RTS
+    00000014 7F08                   ADD         #8,R15
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+SH SERIES C/C++ Compiler (Ver. 6.0C)                                                                 28-Jan-2022 18:03:59  PAGE    1
+
+
+******** STATISTICS INFORMATION ********
+
+
+********** ERROR INFORMATION ***********
+
+NUMBER OF ERRORS:           0
+NUMBER OF WARNINGS:         0
+
+
+
+
+******* SOURCE LINE INFORMATION ********
+
+COMPILED SOURCE LINE:        9
+
+
+
+******* SECTION SIZE INFORMATION *******
+
+PROGRAM  SECTION (P):                               00000016 Byte(s)
+CONSTANT SECTION (C):                               00000000 Byte(s)
+DATA     SECTION (D):                               00000000 Byte(s)
+BSS      SECTION (B):                               00000000 Byte(s)
+
+ TOTAL PROGRAM SIZE: 00000016 Byte(s)
+
+
+
+********** LABEL INFORMATION ***********
+
+NUMBER OF EXTERNAL REFERENCE SYMBOLS:            0
+NUMBER OF EXTERNAL DEFINITION SYMBOLS:           1
+NUMBER OF INTERNAL/EXTERNAL SYMBOLS:             1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+*** COMMAND PARAMETER ***
+
+
+  tests\00017.c -cpu=sh4 -NOLOGO -RTTI=OFF -NOEX -objectfile=tests\00017\00017.elf -listfile=tests\00017\00017.lst -show=source -lan
+g=c -debug 
+

@@ -1,7 +1,7 @@
 from typing import Union
 
 from ruk.jcore.disassembly import Disassembler
-from ruk.jcore.emulator import Emulator
+from ruk.jcore.emulator import Emulator  # generated_
 from ruk.jcore.memory import MemoryMap
 
 
@@ -156,7 +156,7 @@ class CPU:
             op, args = self.disassembler.disasm(int.from_bytes(ins, "big"))
 
             callback = self.emulator.resolve(op)
-            callback(*args)
+            callback(**args)
         except IndexError:
             self.ebreak = True
             if self.debug:

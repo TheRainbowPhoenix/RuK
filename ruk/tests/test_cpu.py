@@ -126,7 +126,7 @@ class TestCPU(TestCase):
 
         # Checking the delay slot
         self.assertEqual(self.cpu.regs[0], 0x3)
-        mock_print.assert_called_with('mov r4, r0')
+        mock_print.assert_called_with('mov R4,R0')
 
     def test_reset(self):
         self.cpu.pc = 0xdeadbeef
@@ -140,7 +140,7 @@ class TestCPU(TestCase):
         self.assertEqual(self.cpu.ebreak, False)
 
     def test_surrounding_memory(self):
-        self.assertEqual(self.cpu.get_surrounding_memory(4), (self.cpu.pc, self.cpu.pc+8, b'\x6E\xF3\x6E\x13\x6A\x13\x6F\x13'))
+        self.assertEqual(self.cpu.get_surrounding_memory(size=4), (self.cpu.pc, self.cpu.pc+8, b'\x6E\xF3\x6E\x13\x6A\x13\x6F\x13'))
 
     def test_reg_pc(self):
         self.assertEqual(self.cpu.reg_pc['pc'], self.cpu.pc)

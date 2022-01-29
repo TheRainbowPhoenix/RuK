@@ -24,24 +24,7 @@ mk = mk[1:]
 # Find an index:
 print(mk.index('bf	label'))
 
-"""
-HERE'S THE REAL COOL STUFF
-
-THIS GENERATES OPCODE !!
-"""
-
-headers = """
-from typing import List, Tuple, Dict
-
-"""
-
-opcodes_table = """
-opcodes_table: List[Tuple[int, str, int, int, Dict[str, int]]] = [
-    # (id, name:str, mask:int, code:int, args: dict{name:str, mask:int}
-   """
-
-abstract_table = """abstract_table = {
-"""
+all_masks = []
 
 index = -1
 all_col = l.split('<div class="col_cont" ')[1:]
@@ -58,14 +41,6 @@ for col in all_col:
     if name.startswith("f") or "FPUL" in name or "FPSCR" in name:
         # NO FPU !
         continue
-
-    abstract = col.split('<div class="col_cont_3">')[1].split('</div>')[0] \
-        .replace("Rn", "R{n:d}").replace("Rm", "R{m:d}") \
-        .replace("disp", "R{d:d}").replace("imm", "h'{i:04x}") \
-        .replace('\t', ' ').replace('\n', ' ')\
-        .replace('&gt', '>').replace('&lt', '<').replace('&amp', '&')
-
-    abstract_table += f"{' ' * 4}{index}: \"{abstract}\",\n"
 
     mask_text = col.split('<div class="col_cont_4">')[1].split('</div>')[0]
 
@@ -93,26 +68,11 @@ for col in all_col:
         for a in args:
             args[a] += '0' if i != a else '1'
 
-    args_list = "\n".join([f"{' ' * 3 * 4}'{i}': 0b{args[i]},  # {i}" for i in args])
+    # if mask not in all_masks:
+    #     all_masks.append(mask)
+    for a in args:
+        if args[a] not in all_masks:
+            all_masks.append(args[a])
 
-    opcodes_table += f""" (
-        {index}, "{name}",
-        0b{mask},
-        0b{code},
-        {{
-{args_list}
-        }}
-    ),"""
 
-    pass
-
-opcodes_table += "\n]\n"
-
-abstract_table += """
-}\n"""
-
-with open("generated_opcodes.py", "w+") as f:
-    f.write(headers)
-    f.write(opcodes_table)
-    f.write("\n")
-    f.write(abstract_table)
+print('\n'.join(all_masks))

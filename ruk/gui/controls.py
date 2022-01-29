@@ -137,6 +137,8 @@ class ControlsFrame(BaseFrame):
             self.on_step_callback()
         except Exception as e:
             print(f"!!! CPU Error : {e} !!!")
+            self._refresh_callback()
+            raise
 
     def do_step_over(self):
         self.do_step()

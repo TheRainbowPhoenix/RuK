@@ -1,6 +1,7 @@
 import time
 import tkinter as tk
 import tkinter.font as tkFont
+from binascii import unhexlify
 from tkinter import ttk
 from typing import Dict, Callable, List, Tuple, Union
 import re
@@ -155,7 +156,7 @@ class LineWrapper:
 
 
 class DisasmFrame(BaseFrame):
-    BUF_SIZE = 64
+    BUF_SIZE = 64 * 2
 
     def __init__(self, cpu: CPU, resources: ResourceManager, **kw):
         super().__init__()
@@ -219,6 +220,7 @@ class DisasmFrame(BaseFrame):
         self._cursors['select']['line'] = line
         self.move_cursor_to_line(line, self._cursors['select'])
         self.refresh_cusor()
+        return "break"
 
     def do_context_menu(self, event):
         line = self.get_line_from_y(event.y)
@@ -230,21 +232,22 @@ class DisasmFrame(BaseFrame):
             self._context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             self._context_menu.grab_release()
+        return "break"
 
     def set_widgets(self, root):
         """
         Setup base widgets
         """
-        widget = tk.Frame(root, bd=0)
-        widget.pack(fill='both', expand=1)
+        self.widget = tk.Frame(root, bd=0)
+        self.widget.pack(fill='both', expand=1)
 
         sz = preferences.current_font.size
 
-        self._canvas_max_height = line_y(self.BUF_SIZE+4)
-        self.canvas = tk.Canvas(widget, width=600, height=650,
+        self._canvas_max_height = line_y(self.BUF_SIZE + 4)
+        self.canvas = tk.Canvas(self.widget, width=600, height=650,
                                 bg=preferences.current_theme.gui_background,
                                 highlightthickness=0,
-                                scrollregion=(0,0,600,self._canvas_max_height))
+                                scrollregion=(0, 0, 600, self._canvas_max_height))
         self.canvas.pack(fill='both', expand=1)
         self._setup_text()
 
@@ -289,9 +292,11 @@ class DisasmFrame(BaseFrame):
         root.bind_all("<Control-c>", lambda x: self.do_copy_instructions())
         root.bind_all("<Control-Shift-c>", lambda x: self.do_copy_address())
         root.bind_all("<Control-Shift-C>", lambda x: self.do_copy_address())
-        root.bind_all("<MouseWheel>", self.do_mousewheel)
-        root.bind_all("<Motion>", self.do_motion)
-        root.bind_all("<B1-Motion>", self.do_b1_motion)
+        root.bind_all("<Home>", lambda x: self.do_back_top())
+
+        self.canvas.bind("<MouseWheel>", self.do_mousewheel)
+        self.canvas.bind("<Motion>", self.do_motion)
+        self.canvas.bind("<B1-Motion>", self.do_b1_motion)
 
         self._setup_context_menu(root)
 
@@ -301,6 +306,7 @@ class DisasmFrame(BaseFrame):
             line = self._buffer[line_pos]
             to_clip(line.addr_var.get())
 
+            return "break"
         except (IndexError, KeyError) as e:
             return
 
@@ -309,9 +315,15 @@ class DisasmFrame(BaseFrame):
         try:
             line = self._buffer[line_pos]
             to_clip(str(line))
+            return "break"
 
         except (IndexError, KeyError) as e:
             return
+
+    def do_back_top(self):
+        self.canvas.yview_moveto(0)
+        self.apply_scroll()
+        return "break"
 
     def do_pc_set(self):
         line_pos: int = self._cursors['select']['line']
@@ -331,11 +343,32 @@ class DisasmFrame(BaseFrame):
             return
 
     def do_memory_edit(self):
-        # TODO: finish this...
-        from ruk.gui.dialogs import EditBytesDialog
+        line_pos: int = self._cursors['select']['line']
+        try:
+            line = self._buffer[line_pos]
 
-        edit_dialog = EditBytesDialog(0)
+            self.show_edit_memory(int(line.addr_var.get(), 16))
+            to_clip(str(line))
+
+        except (IndexError, KeyError) as e:
+            return
+
+        # TODO: finish this...
+
+    def show_edit_memory(self, address: int):
+        from ruk.gui.dialogs import EditBytesDialog
+        try:
+            root = self.widget.master.master
+        except:
+            root = None
+
+        edit_dialog = EditBytesDialog(root, address, self._cpu)
         edit_dialog.show()
+        value = edit_dialog.ret_val
+        if value is not None:
+            bytes_data = unhexlify(f'{int(value[:4], 16):04x}')
+            self._cpu.mem._write16(address, bytes_data)
+            self.refresh_asm()
 
     def _setup_context_menu(self, root):
         # TODO: custom menu, remove the border...
@@ -401,13 +434,13 @@ class DisasmFrame(BaseFrame):
         self._arrows = []
 
         try:
-            start_p, end_p, mem = self._cpu.get_surrounding_memory()
+            start_p, end_p, mem = self._cpu.get_surrounding_memory(size=self.BUF_SIZE)
             memory = BytesIO(mem)
         except IndexError:
             # TODO: chage this !
             start_p, end_p = 0, 0
             # Looks like default behaviour
-            memory = BytesIO(b'\x0f' * 20 * 2)
+            memory = BytesIO(b'\x00' * self.BUF_SIZE * 2)
 
         index = 0
         # Read it two bytes by two bytes
@@ -415,7 +448,7 @@ class DisasmFrame(BaseFrame):
             if index >= self.BUF_SIZE:
                 break
 
-            addr_str = f"0x{start_p + (index * 2):08x}"
+            addr_str = f"0x{start_p + (index * 2):04x}"
             op_str = '.word'
             var_str = ''
             text_str = ''
@@ -424,19 +457,20 @@ class DisasmFrame(BaseFrame):
             try:
                 op_str, args = self.disasm.disasm(val, trace_only=True)
 
-                op_mod = op_str % args
+                op_mod = op_str.format(**args)  # op_str % args
                 ops = op_mod.split(" ")
                 op_str = ops[0]
 
                 # Recreate address
                 if op_str in ['bf', 'bra']:  # TODO: move this to a constant list
+                    jmp = args[list(args)[0]]
                     var_str = hex(
                         start_p + (index * 2) +  # Addr
-                        args[0] * 2 +  # Jump of N bytes
+                        jmp * 2 +  # Jump of N bytes
                         4
                     )
 
-                    self.queue_arrow(index, args[0] + 2)
+                    self.queue_arrow(index, jmp + 2)
 
                 else:
                     var_str = ' '.join(ops[1:]) if len(ops) > 1 else ''
@@ -445,8 +479,11 @@ class DisasmFrame(BaseFrame):
                 # line = f"{addr_str} {op_str:<8} {var_str}"
 
             except IndexError:
-                var_str = f'0x{val:08x}'
+                var_str = f'0x{val:04x}'
                 # line = f"{addr_str} {'.word':<8} 0x{val:08x}"
+            except TypeError as e:
+                print(op_str, args)
+                raise e
 
             # f'{i:04X} - {int(time.time())}'
 
@@ -474,11 +511,20 @@ class DisasmFrame(BaseFrame):
     def get_op_color(self, op: str) -> str:
         if op.startswith("mov"):
             return preferences.current_theme.mov
-        elif op in ["bf", "bra"]:
+        elif op in ["bf", "bra", "bt", "bf.s", "bt.s"]:
             return preferences.current_theme.jmp
+        elif op in ["rts"]:
+            return preferences.current_theme.ret
         elif op.startswith("cmp"):
             return preferences.current_theme.cmp
-        elif op.startswith("add"):  # TODO: sub, etc
+        elif op.startswith("bsr"):
+            return preferences.current_theme.call
+        elif (op.startswith("add") or
+            op.startswith("mul") or
+            op.startswith("mac") or
+            op.startswith("neg") or
+            op.startswith("sub")
+        ):  # TODO: sub, etc
             return preferences.current_theme.math
         elif op.startswith("."):
             return preferences.current_theme.trap
@@ -570,9 +616,15 @@ class DisasmFrame(BaseFrame):
 
     # Mouse scroll stuff !
     def do_mousewheel(self, event):
-        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        self._scroll_top = round(self._canvas_max_height * self.canvas.yview()[0])
+        pos = int(-1 * (event.delta / 120))
+        self.canvas.yview_scroll(pos, "units")
+        self.apply_scroll()
+
         # todo: fetch older / newer ??
+        return "break"
+
+    def apply_scroll(self):
+        self._scroll_top = round(self._canvas_max_height * self.canvas.yview()[0])
 
     def do_motion(self, e):
         sensibility = 2
@@ -584,7 +636,7 @@ class DisasmFrame(BaseFrame):
             if self._changes['cursor']:
                 self.canvas.config(cursor="")
                 self._changes['drag'] = False
-        pass
+        return "break"
 
     MIN_GUTTER_SIZE = 8
     MAX_GUTTER_SIZE = 500
@@ -596,3 +648,4 @@ class DisasmFrame(BaseFrame):
                 self._changes['gutter_size'] = True
                 self.gutter_size = x
                 self.refresh_display()
+        return "break"

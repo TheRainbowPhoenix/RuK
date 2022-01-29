@@ -37,6 +37,7 @@ _default_theme = {
     "ec ret": '#d06060',
     "ec swi": '#d06060',
     "ec trap": '#d06060',
+    "ec call": '#ff7733',
     "ec ucall": '#5ccfe6',
     "ec ujmp": '#c2d94c',
     "ec usrcmt": '#fa6e32',
@@ -94,6 +95,10 @@ class ColorTheme(DictWrapper):
         return self._values["ec jmp"]
 
     @property
+    def ret(self):
+        return self._values["ec ret"]
+
+    @property
     def cmp(self):
         return self._values["ec cmp"]
 
@@ -116,6 +121,10 @@ class ColorTheme(DictWrapper):
     @property
     def flow(self):
         return self._values["ec flow"]
+
+    @property
+    def call(self):
+        return self._values["ec call"]
 
     @property
     def gui_background(self):

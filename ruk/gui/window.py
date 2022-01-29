@@ -20,11 +20,17 @@ PLATFORM = sys.platform
 
 
 class BaseWindow(object):
-    def __init__(self, title: str = "Unnamed window"):
-        root = tk.Tk()
-        self.root = root
-        self.root.title(title)
+    def __init__(self, title: str = "Unnamed window", root=None):
+        if root is None:
+            self.root = tk.Tk()
+        else:
+            self.root = root
 
+        if "win" in PLATFORM:
+            app_id = u'local.konshin.phoebe.RuK'
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+
+        self.root.title(title)
         self.root.resizable(True, True)
 
         self.preferences: Preferences = preferences
@@ -33,13 +39,11 @@ class BaseWindow(object):
 
         self.screensize = (800, 600)
 
-        self.set_theme()
+        if root is None:
+            self.set_theme()
 
     def win32_fixes(self):
         if "win" in PLATFORM:
-            app_id = u'local.konshin.phoebe.RuK'
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
-
             try:
                 ctypes.windll.shcore.SetProcessDpiAwareness(2)  # if your windows version >= 8.1
             except:
@@ -81,9 +85,27 @@ class BaseWindow(object):
         self.root.mainloop()
 
 
+class ModalWindow(BaseWindow):
+    def __init__(self, title: str = "Unnamed window", parent: tk.Tk = None):
+        if parent is None:
+            parent = tk.Tk()
+
+        root = tk.Toplevel(parent)
+
+        self.ret_val: typing.Any = None
+
+        super().__init__(title, root=root)
+
+
+        self.root.transient(parent)
+        self.root.grab_set()
+        # self.root = root
+        self.root.title(title)
+
+
 class DebuggerWindow(BaseWindow):
     def __init__(self, **kw):
-        super().__init__("RuK - Debugger")
+        super().__init__(title="RuK - Debugger")
 
         self.frames: typing.List[BaseFrame] = []
 
@@ -97,6 +119,7 @@ class DebuggerWindow(BaseWindow):
 
         self.control_ctrl: ControlsFrame = ControlsFrame(self._cp.cpu, self.resources)
         self.control_ctrl.hook(control_frame)
+        self.control_ctrl.set_refresh_callback(self.refresh_all)
 
         control_frame.pack(fill=tk.X, side=tk.TOP, expand=False, anchor=tk.N)
 

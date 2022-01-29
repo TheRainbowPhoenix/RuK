@@ -1,9 +1,24 @@
 from ruk.classpad import Classpad
 from ruk.gui.window import DebuggerWindow
 
-rom = b"\xe3\x01t\x0147\x8b\x18\xe1\x024\x17\x8b\x13\xe0\x034\x07\x8b\x10\xe2\x044'\x8b\r\xe1\x054\x17\x8b\n\xe0\x064\x07\x8b\x07\xe2\x074'\x8b\x04\xe1\x084\x17\x8b\x01\xe0\t4\x07\xa0\x01\xe4e\xe4\n\x00\x0b`C"
+from ruk.tools.elf import ELFFile
+
+# rom =
 
 if __name__ == '__main__':
+    # Reading some ELF, for testing
+    # elf = ELFFile()
+    # elf.read("elfs/17/00017.elf")
+    # rom = elf.P
+
+    # Reading raw bytes
+    with open("elfs/rom_01.bin", 'rb') as f:
+        rom = f.read()
+
+    # Reading test opcodes file
+    # with open("scratches/all_opcodes.bin", 'rb') as f:
+    #     rom = f.read()
+
     cp = Classpad(rom, debug=True)
     dbg_win = DebuggerWindow()
     dbg_win.attach(cp)

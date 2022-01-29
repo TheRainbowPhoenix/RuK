@@ -128,3 +128,24 @@ class MemoryMap:
         raise IndexError(f"Edge case not handled : {start_p} {end_p}")
         # return start_p, end_p, b'\x0f'*(size*2)
 
+    def _write16(self, address: int, bytes_data: bytes):
+        """
+        Potentially dangerous function that write anywhere in memory.
+        Used for the "Edit" functions of the GUI
+        """
+        mem, start = self.resolve(address)
+        # Can write 4bytes ?
+        if address + 1 <= start + len(mem):
+            return mem.write_bin(address - start, bytes_data)
+        raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover
+
+    def _write8(self, address: int, bytes_data: bytes):
+        """
+        Potentially dangerous function that write anywhere in memory.
+        Used for the "Edit" functions of the GUI
+        """
+        mem, start = self.resolve(address)
+        # Can write 4bytes ?
+        if address <= start + len(mem):
+            return mem.write_bin(address - start, bytes_data)
+        raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover

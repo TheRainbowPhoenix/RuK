@@ -1,41 +1,139 @@
+import string
 import tkinter as tk
+from binascii import unhexlify
 from tkinter import ttk
 
-from ruk.gui.window import BaseWindow
+from ruk.gui.window import BaseWindow, ModalWindow
+from ruk.jcore.cpu import CPU
 
 
-class EditBytesDialog(BaseWindow):
-    def __init__(self, address: int):
-        super().__init__(f"Edit Bytes at {hex(address)}")
+# root.attributes("-toolwindow", 1)
 
-        self._setup()
+class EditBytesDialog(ModalWindow):
+    def __init__(self, root: tk.Tk, address: int, cpu: CPU):
+        super().__init__(parent=root, title=f"Edit {hex(address)}")
+
+        self.root.resizable(False, False)
+
+        self._cpu = cpu
+        self.address = address
+
+        self.asm_preview = tk.StringVar()
+        self.hex_data = tk.StringVar()
+        self._ret_data = tk.StringVar()
+
+        self._valid_flag = True
+
+        try:
+            self._setup()
+        except Exception as e:
+            # TODO: real error message
+            print(f"Invalid addr provided {hex(self.address)} !")
+            raise e
+
+    def disasm(self, chunk: bytes) -> str:
+        try:
+            val = int.from_bytes(chunk, "big")
+            self._valid_flag = True
+            try:
+                op_str, args = self._cpu.disassembler.disasm(val, trace_only=True)
+                return op_str.format(**args) + ";"  #op_str % args + ";"  #
+            except IndexError:
+                return f".word 0x{val:04x}"
+
+        except Exception as e:
+            print(e)
+            self._valid_flag = False
+            return "Unknown Instruction"
+
+    VALID_CHARS = string.hexdigits + ' ' + '\t'
+
+    def update_preview(self, *_):
+        try:
+            raw_data = self.hex_data.get()
+            filtered_data = ''.join([
+                c for c in raw_data if c in string.hexdigits
+            ])
+
+            hex_data = ''.join(filtered_data.strip().split())
+
+            if len(hex_data) != len(raw_data):
+                self.hex_data.set(filtered_data)
+
+            if len(hex_data) > 4:
+                if len(raw_data) == len(hex_data):
+                    self.hex_data.set(self.hex_data.get()[:4])
+                else:
+                    self.hex_data.set(hex_data[:4])
+                return False
+
+            if len(hex_data) % 2 != 0:
+                return True
+
+
+            # self.hex_data.set(raw_data)
+            self._ret_data.set(hex_data)
+            data = unhexlify(hex_data)
+            asm = self.disasm(data)
+
+            self.asm_preview.set(asm)
+
+        except Exception as e:
+            print(e)
+
+        return True
+
+    def to_clip(self, event=None):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.hex_data.get())
+        return "break"
 
     def _setup(self):
-        self.frame = ttk.Frame(self.root)
-        self.frame.pack(ipadx=2, ipady=2)
+        self.root.bind('<Control-c>', func=self.to_clip)
 
-        self.entry = ttk.Entry(self.frame)
-        self.entry.pack()
+        self.frame = ttk.Frame(self.root)
+        self.frame.pack(ipadx=2, ipady=2, padx=8, pady=2)
+
+        self.mem = self._cpu.mem.read16(self.address)
+        self.asm_preview.set(self.disasm(self.mem))
+
+        self.hex_data.set(self.mem.hex())
+
+        self.entry = ttk.Entry(self.frame, textvariable=self.hex_data,
+                               validatecommand=self.update_preview, validate='all')
+        self.entry.bind("<KeyRelease>", self.update_preview)
+        self.entry.bind("<Return>", self.do_ok)
+        self.entry.bind("<Escape>", self.do_cancel)
+        self.entry.pack(padx=8, pady=8)
         self.entry.focus_set()
 
-        self.message = ttk.Label(self.frame, text="bf 0x0800006a;")
-        self.message.pack(padx=8, pady=8)
+        self.message = ttk.Label(self.frame, textvariable=self.asm_preview)
+        self.message.pack(padx=8, pady=4)
 
         self.btn_frame = ttk.Frame(self.root)
         self.btn_frame.pack(padx=4, pady=4)
 
+        btn_1 = ttk.Button(self.btn_frame, width=8,
+                           text="OK",
+                           style="Accent.TButton")
+        btn_1['command'] = self.do_ok
+        btn_1.pack(side='right', padx=4, pady=4)
 
         btn_2 = ttk.Button(self.btn_frame, width=8, text="Cancel")
-        # btn_1['command'] = self.b1_action
-        btn_2.pack(side='right')
-
-        btn_1 = ttk.Button(self.btn_frame, width=8, text="OK")
-        # btn_1['command'] = self.b1_action
-        btn_1.pack(side='right')
-
+        btn_2['command'] = self.do_cancel
+        btn_2.pack(side='right', padx=4, pady=4)
 
         self.root.deiconify()
 
+    def do_ok(self, *_):
+        self.ret_val = self._ret_data.get()
+        self.root.quit()
+        self.root.destroy()
+
+    def do_cancel(self, *_):
+        self.ret_val = None
+        self.root.quit()
+        self.root.destroy()
 
 
 class MessageBox(BaseWindow):

@@ -16,10 +16,12 @@ class Emulator:
         self._resolve_table = {
             0: self.mov,
             1: self.movi,
+            16: self.movbm,
             79: self.add,
             80: self.addi,
             88: self.cmpgt,
             149: self.bf,
+            153: self.bra,
             161: self.rts,
         }
 
@@ -57,6 +59,16 @@ class Emulator:
         else:
             self.cpu.regs[n] = c_long(0xFFFFFF00 | c_long(-1).value).value
 
+        self.cpu.pc += 2
+
+    def movbm(self, m: int, n: int):
+        """
+        Rn-1 -> Rn, Rm -> (Rn)
+        :param m: register index (between 0 and 15)
+        :param n: register index (between 0 and 15)
+        """
+        self.cpu.mem._write8(self.cpu.regs[n]-1, self.cpu.regs[m])
+        self.cpu.regs[n] -= 1
         self.cpu.pc += 2
 
     def add(self, m: int, n: int):
@@ -102,6 +114,16 @@ class Emulator:
             self.cpu.pc += 4 + (disp << 1)
         else:
             self.cpu.pc += 2
+
+    def bra(self, d: int):
+        """
+        disp*2 + PC + 4 -> PC
+        :param d: label
+        """
+        disp: int = abs(d)
+        pc = self.cpu.pc
+        self.cpu.pc += 4 + (disp << 1)
+        self.cpu.delay_slot(pc + 2)
 
     def rts(self):
         """
