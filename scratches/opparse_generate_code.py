@@ -1,6 +1,8 @@
 with open("Renesas SH Instruction Set Summary.html") as f:
     l = f.read()
 
+import re
+
 """
 HERE'S THE REAL COOL STUFF
 
@@ -87,6 +89,7 @@ for col in all_col:
 
     skip_flag = False
     line_spacing = 0
+    continue_spacing_flag = False
     for line in pre_code.split('\n')[1:]:
         line = line.strip()
         if line in '{}':
@@ -117,22 +120,67 @@ for col in all_col:
             code_lines.append(f"{' ' * 4 * line_spacing}self.cpu.pc += 2")
             continue
 
+        if re.match("R\[(n|m)\] = R\[(n|m)\];", line):
+            code_lines.append(
+                line.replace("R[n]", "self.cpu.regs[n]") \
+                .replace("R[m]", "self.cpu.regs[m]").replace(';', ''))
+            continue
+
+        line = line.replace("Read_", "self.cpu.mem.read").replace("Write_", "self.cpu.mem.write")
 
         line = line.replace("R[n]", "self.cpu.regs[n]") \
             .replace("R[m]", "self.cpu.regs[m]")
 
-        # if line.startswith("if"):
-        #     line += ":"
-        #     line_spacing = 1
-        #     code_lines.append(f"{' ' * 4 * line_spacing}if")
-        #     continue
-        # elif line == "else":
-        #     line_spacing = 1
-        #     code_lines.append(f"{' ' * 4 * line_spacing}else:")
-        #     continue
+        if line.startswith("if"):
+            if "{" in line:
+                continue_spacing_flag = True
+                raise Exception("What to do ???")
+            line += ":"
+            if line_spacing > 0:
+                line_spacing -= 1
+            code_lines.append(f"# {' ' * 4 * line_spacing}{line}  # TODO")
+            line_spacing += 1
+            continue
+        elif line == "else":
+            if "{" in line:
+                continue_spacing_flag = True
+                raise Exception("What to do ???")
+            line += ":"
+            if line_spacing > 0:
+                line_spacing -= 1
+            code_lines.append(f"# {' ' * 4 * line_spacing}{line}  # TODO")
+            line_spacing += 1
+            continue
+
+        if line.endswith(";"):
+            line = line[:-1]
+
+        if "PC" in line:
+            line = line.replace("PC", "self.cpu.pc")
+        if "GBR" in line:
+            line = line.replace("GBR", "self.cpu.regs['gbr']")
+
+        if "R[0]" in line:
+            line = line.replace("R[0]", "self.cpu.regs[0]")
+
+        if "Delay_Slot " in line:
+            line = line.replace("Delay_Slot ", "self.cpu.delay_slot")
+
+        # T = self.cpu.regs['sr']
+
+        if ("(T == 0)") in line:
+            line = line.replace("(T == 0)", "self.cpu.regs['sr'] == 0")
+
+        if "(0xFFFFFF00 | d)" in line:
+            line = line.replace("(0xFFFFFF00 | d)", "c_long(0xFFFFFF00 | d).value")
 
         print(line)
-        code_lines.append(f"# TODO:  {line}")
+
+
+        code_lines.append(f"# {' ' * 4 * line_spacing}{line}  # TODO: generated")
+
+        if line_spacing > 0 and not continue_spacing_flag:
+            line_spacing -= 1
 
     print("\n")
 

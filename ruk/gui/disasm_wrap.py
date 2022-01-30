@@ -2,6 +2,7 @@ import time
 import tkinter as tk
 import tkinter.font as tkFont
 from binascii import unhexlify
+from ctypes import c_long
 from tkinter import ttk
 from typing import Dict, Callable, List, Tuple, Union
 import re
@@ -367,7 +368,7 @@ class DisasmFrame(BaseFrame):
         value = edit_dialog.ret_val
         if value is not None:
             bytes_data = unhexlify(f'{int(value[:4], 16):04x}')
-            self._cpu.mem._write16(address, bytes_data)
+            self._cpu.mem.write16(address, bytes_data)
             self.refresh_asm()
 
     def _setup_context_menu(self, root):
@@ -462,8 +463,15 @@ class DisasmFrame(BaseFrame):
                 op_str = ops[0]
 
                 # Recreate address
-                if op_str in ['bf', 'bra']:  # TODO: move this to a constant list
+                if op_str in ['bf', 'bra', 'bt', 'bf.s']:  # TODO: move this to a constant list
                     jmp = args[list(args)[0]]
+
+                    if op_str in ['bra']:
+                        if (jmp & 0x800) == 0:
+                            jmp = (0x00000FFF & jmp)
+                        else:
+                            jmp = c_long(0xFFFFF000 | jmp).value
+
                     var_str = hex(
                         start_p + (index * 2) +  # Addr
                         jmp * 2 +  # Jump of N bytes
@@ -511,6 +519,8 @@ class DisasmFrame(BaseFrame):
     def get_op_color(self, op: str) -> str:
         if op.startswith("mov"):
             return preferences.current_theme.mov
+        elif op in ["nop"]:
+            return preferences.current_theme.nop
         elif op in ["bf", "bra", "bt", "bf.s", "bt.s"]:
             return preferences.current_theme.jmp
         elif op in ["rts"]:
@@ -561,11 +571,14 @@ class DisasmFrame(BaseFrame):
         starting_pos_x = {}
         ending_pos = []
         ending_pos_x = {}
+        pos_color = {}
 
         for index in range(len(self._arrows)):
             x = self.gutter_size - ((index + 1) * spacing * 2 * width) - spacing_start
             start = line_y(self._arrows[index][1]) + line_height() // 2
             end = line_y(self._arrows[index][1] + self._arrows[index][2] + 1) - line_height() // 2
+
+            fill = preferences.current_theme.flow if start < end else preferences.current_theme.other
 
             self._arrows[index][0] = self.canvas.create_line(
                 x,
@@ -573,18 +586,25 @@ class DisasmFrame(BaseFrame):
                 x,
                 end,
                 width=width,
-                fill=preferences.current_theme.flow)
+                fill=fill)
 
             if start not in starting_pos:
                 starting_pos.append(start)
                 starting_pos_x[start] = x
+                pos_color[start] = fill
             else:
                 starting_pos_x[start] = min(x, starting_pos_x[start])
+                if pos_color[end] != fill and fill == preferences.current_theme.flow:
+                    pos_color[end] = fill
+
             if end not in ending_pos:
                 ending_pos.append(end)
                 ending_pos_x[end] = x
+                pos_color[end] = fill
             else:
                 ending_pos_x[end] = min(x, ending_pos_x[end])
+                if pos_color[end] != fill and fill == preferences.current_theme.flow:
+                    pos_color[end] = fill
 
             self._arrows_memo.append(self._arrows[index])
 
@@ -595,7 +615,7 @@ class DisasmFrame(BaseFrame):
                 self.gutter_size - 1,
                 pos,
                 width=width,
-                fill=preferences.current_theme.flow)
+                fill=pos_color[pos])
             self._arrows_memo.append((arrow_start,))
 
         for pos in ending_pos:
@@ -605,7 +625,7 @@ class DisasmFrame(BaseFrame):
                 self.gutter_size - 1,
                 pos,
                 width=width,
-                fill=preferences.current_theme.flow,
+                fill=pos_color[pos],
                 arrow=tk.LAST)
             self._arrows_memo.append((arrow_end,))
 

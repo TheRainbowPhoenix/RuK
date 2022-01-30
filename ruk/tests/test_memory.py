@@ -17,6 +17,8 @@ class TestMemory(TestCase):
         self.assertEqual(self.mem.read8(-1), 0)
         self.assertEqual(self.mem[0x0], 0)
 
+        self.assertEqual(self.memmap.read8(0x870), b'\xff')
+
         self.assertEqual(self.mem[0x70], 0xFF)
 
         with self.assertRaises(IndexError):
@@ -110,5 +112,15 @@ class TestMemory(TestCase):
 
     def test__write16(self):
         self.assertEqual(self.memmap.read16(0x870), b'\xFF\xFF')
-        self.memmap._write16(0x870, b'\x13\x3F')
+        self.memmap.write16(0x870, b'\x13\x3F')
         self.assertEqual(self.memmap.read16(0x870), b'\x13\x3F')
+
+    def test__write32(self):
+        self.assertEqual(self.memmap.read32(0x870), b'\xFF\xFF\xFF\xFF')
+        self.memmap.write32(0x870, b'\x13\x3F\xde\xad')
+        self.assertEqual(self.memmap.read32(0x870), b'\x13\x3F\xde\xad')
+
+    def test__write8(self):
+        self.assertEqual(self.memmap.read8(0x870), b'\xFF')
+        self.memmap.write8(0x870, b'\x42')
+        self.assertEqual(self.memmap.read8(0x870), b'\x42')

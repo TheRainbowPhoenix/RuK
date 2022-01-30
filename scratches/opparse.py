@@ -51,9 +51,10 @@ for col in all_col:
         continue
 
     name = col.split('<div class="col_cont_2">')[1].split('</div>')[0] \
-        .replace("Rn", "R{n:d}").replace("Rm", "R{m:d}") \
-        .replace("disp", "R{d:d}").replace("imm", "h'{i:04x}") \
-        .replace('\t', ' ').replace('&amp', '&')
+        .replace("Rn", "r{n:d}").replace("Rm", "r{m:d}") \
+        .replace("disp", "0x{d:02x}").replace("imm", "h'{i:04x}") \
+        .replace('\t', ' ').replace('&amp', '&').replace(",", ", ")\
+        .replace("bf/s", "bf.s").replace("bt/s", "bt.s").replace("label", "0x{d:04x}")
 
     if name.startswith("f") or "FPUL" in name or "FPSCR" in name:
         # NO FPU !
@@ -63,7 +64,7 @@ for col in all_col:
         .replace("Rn", "R{n:d}").replace("Rm", "R{m:d}") \
         .replace("disp", "R{d:d}").replace("imm", "h'{i:04x}") \
         .replace('\t', ' ').replace('\n', ' ')\
-        .replace('&gt', '>').replace('&lt', '<').replace('&amp', '&')
+        .replace('&gt;', '>').replace('&lt;', '<').replace('&amp;', '&')
 
     abstract_table += f"{' ' * 4}{index}: \"{abstract}\",\n"
 

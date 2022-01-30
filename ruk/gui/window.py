@@ -139,6 +139,7 @@ class DebuggerWindow(BaseWindow):
 
         self.reg_ctrl_frame: RegisterFrame = RegisterFrame(self._cp.cpu)
         self.reg_ctrl_frame.hook(regs_frame)
+        self.reg_ctrl_frame.set_refresh_callback(self.refresh_all)
         self.frames.append(self.reg_ctrl_frame)
 
         regs_frame.pack(fill=tk.BOTH, side=tk.RIGHT, expand=False, anchor=tk.SE)
@@ -146,6 +147,7 @@ class DebuggerWindow(BaseWindow):
     def refresh_all(self):
         for frame in self.frames:
             frame.refresh()
+        self.asm_view.refresh_asm()
 
     def setup_callbacks(self):
         def on_step():

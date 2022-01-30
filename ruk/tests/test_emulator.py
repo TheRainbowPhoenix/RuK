@@ -90,5 +90,12 @@ class TestEmulator(TestCase):
 
         self.assertEqual(self.emu.cpu.pc, 20)
 
+    def test_movbs(self):
+        self.emu.cpu.regs[2] = 0x8001
+        self.emu.cpu.regs[1] = 0x42
+        self.emu.MOVBS(2, 1)
+        self.emu.cpu.mem.write8.assert_called_once()
+        self.emu.cpu.mem.write8.assert_called_with(0x42, 0x8001)
+
 
 

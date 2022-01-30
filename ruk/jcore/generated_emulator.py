@@ -206,7 +206,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = self.cpu.regs[m];
+        self.cpu.regs[n] = self.cpu.regs[m]
         self.cpu.pc += 2
     
     def MOVI(self, i: int, n: int):
@@ -215,10 +215,10 @@ class Emulator:
         :param i: value to add (up to 0xFF)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if ((i & 0x80) == 0)
-        # TODO:  self.cpu.regs[n] = (0x000000FF & i);
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] = (0xFFFFFF00 | i);
+        # if ((i & 0x80) == 0):  # TODO
+        #     self.cpu.regs[n] = (0x000000FF & i)  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] = (0xFFFFFF00 | i)  # TODO: generated
         self.cpu.pc += 2
     
     def MOVA(self, d: int):
@@ -226,9 +226,9 @@ class Emulator:
         (disp*4) + (PC & 0xFFFFFFFC) + 4 -> R0
         :param d: disp
         """
-        # TODO:  unsigned int disp;
-        # TODO:  disp = (unsigned int)(0x000000FF & d);
-        # TODO:  R[0] = (PC & 0xFFFFFFFC) + 4 + (disp << 2);
+        # unsigned int disp  # TODO: generated
+        # disp = (unsigned int)(0x000000FF & d)  # TODO: generated
+        # self.cpu.regs[0] = (self.cpu.pc & 0xFFFFFFFC) + 4 + (disp << 2)  # TODO: generated
         self.cpu.pc += 2
     
     def MOVWI(self, d: int, n: int):
@@ -237,12 +237,12 @@ class Emulator:
         :param d: disp
         :param n: register index (between 0 and 15)
         """
-        # TODO:  unsigned int disp = (0x000000FF & d);
-        # TODO:  self.cpu.regs[n] = Read_16 (PC + 4 + (disp << 1));
-        # TODO:  if ((self.cpu.regs[n] & 0x8000) == 0)
-        # TODO:  self.cpu.regs[n] &= 0x0000FFFF;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] |= 0xFFFF0000;
+        # unsigned int disp = (0x000000FF & d)  # TODO: generated
+        # self.cpu.regs[n] = self.cpu.mem.read16 (self.cpu.pc + 4 + (disp << 1))  # TODO: generated
+        # if ((self.cpu.regs[n] & 0x8000) == 0):  # TODO
+        #     self.cpu.regs[n] &= 0x0000FFFF  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] |= 0xFFFF0000  # TODO: generated
         self.cpu.pc += 2
     
     def MOVLI(self, d: int, n: int):
@@ -251,8 +251,8 @@ class Emulator:
         :param d: disp
         :param n: register index (between 0 and 15)
         """
-        # TODO:  unsigned int disp = (0x000000FF & d);
-        # TODO:  self.cpu.regs[n] = Read_32 ((PC & 0xFFFFFFFC) + 4 + (disp << 2));
+        # unsigned int disp = (0x000000FF & d)  # TODO: generated
+        # self.cpu.regs[n] = self.cpu.mem.read32 ((self.cpu.pc & 0xFFFFFFFC) + 4 + (disp << 2))  # TODO: generated
         self.cpu.pc += 2
     
     def MOVBL(self, m: int, n: int):
@@ -261,11 +261,11 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = Read_8 (self.cpu.regs[m]);
-        # TODO:  if ((self.cpu.regs[n] & 0x80) == 0)
-        # TODO:  self.cpu.regs[n] &= 0x000000FF;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] |= 0xFFFFFF00;
+        # self.cpu.regs[n] = self.cpu.mem.read8 (self.cpu.regs[m])  # TODO: generated
+        # if ((self.cpu.regs[n] & 0x80) == 0):  # TODO
+        #     self.cpu.regs[n] &= 0x000000FF  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] |= 0xFFFFFF00  # TODO: generated
         self.cpu.pc += 2
     
     def MOVWL(self, m: int, n: int):
@@ -274,11 +274,11 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = Read_16 (self.cpu.regs[m]);
-        # TODO:  if ((self.cpu.regs[n] & 0x8000) == 0)
-        # TODO:  self.cpu.regs[n] &= 0x0000FFFF;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] |= 0xFFFF0000;
+        # self.cpu.regs[n] = self.cpu.mem.read16 (self.cpu.regs[m])  # TODO: generated
+        # if ((self.cpu.regs[n] & 0x8000) == 0):  # TODO
+        #     self.cpu.regs[n] &= 0x0000FFFF  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] |= 0xFFFF0000  # TODO: generated
         self.cpu.pc += 2
     
     def MOVLL(self, m: int, n: int):
@@ -287,7 +287,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = Read_32 (self.cpu.regs[m]);
+        # self.cpu.regs[n] = self.cpu.mem.read32 (self.cpu.regs[m])  # TODO: generated
         self.cpu.pc += 2
     
     def MOVBS(self, m: int, n: int):
@@ -296,7 +296,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  Write_8 (self.cpu.regs[n], self.cpu.regs[m]);
+        # self.cpu.mem.write8 (self.cpu.regs[n], self.cpu.regs[m])  # TODO: generated
         self.cpu.pc += 2
     
     def MOVWS(self, m: int, n: int):
@@ -305,7 +305,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  Write_16 (self.cpu.regs[n], self.cpu.regs[m]);
+        # self.cpu.mem.write16 (self.cpu.regs[n], self.cpu.regs[m])  # TODO: generated
         self.cpu.pc += 2
     
     def MOVLS(self, m: int, n: int):
@@ -314,7 +314,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  Write_32 (self.cpu.regs[n], self.cpu.regs[m]);
+        # self.cpu.mem.write32 (self.cpu.regs[n], self.cpu.regs[m])  # TODO: generated
         self.cpu.pc += 2
     
     def MOVBP(self, m: int, n: int):
@@ -323,13 +323,13 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = Read_8 (self.cpu.regs[m]);
-        # TODO:  if ((self.cpu.regs[n] & 0x80) == 0)
-        # TODO:  self.cpu.regs[n] &= 0x000000FF;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] |= 0xFFFFFF00;
-        # TODO:  if (n != m)
-        # TODO:  self.cpu.regs[m] += 1;
+        # self.cpu.regs[n] = self.cpu.mem.read8 (self.cpu.regs[m])  # TODO: generated
+        # if ((self.cpu.regs[n] & 0x80) == 0):  # TODO
+        #     self.cpu.regs[n] &= 0x000000FF  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] |= 0xFFFFFF00  # TODO: generated
+        # if (n != m):  # TODO
+        #     self.cpu.regs[m] += 1  # TODO: generated
         self.cpu.pc += 2
     
     def MOVWP(self, m: int, n: int):
@@ -338,13 +338,13 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = Read_16 (self.cpu.regs[m]);
-        # TODO:  if ((self.cpu.regs[n] & 0x8000) == 0)
-        # TODO:  self.cpu.regs[n] &= 0x0000FFFF;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] |= 0xFFFF0000;
-        # TODO:  if (n != m)
-        # TODO:  self.cpu.regs[m] += 2;
+        # self.cpu.regs[n] = self.cpu.mem.read16 (self.cpu.regs[m])  # TODO: generated
+        # if ((self.cpu.regs[n] & 0x8000) == 0):  # TODO
+        #     self.cpu.regs[n] &= 0x0000FFFF  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] |= 0xFFFF0000  # TODO: generated
+        # if (n != m):  # TODO
+        #     self.cpu.regs[m] += 2  # TODO: generated
         self.cpu.pc += 2
     
     def MOVLP(self, m: int, n: int):
@@ -353,9 +353,9 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = Read_32 (self.cpu.regs[m]);
-        # TODO:  if (n != m)
-        # TODO:  self.cpu.regs[m] += 4;
+        # self.cpu.regs[n] = self.cpu.mem.read32 (self.cpu.regs[m])  # TODO: generated
+        # if (n != m):  # TODO
+        #     self.cpu.regs[m] += 4  # TODO: generated
         self.cpu.pc += 2
     
     def MOVBM(self, m: int, n: int):
@@ -364,8 +364,8 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  Write_8 (self.cpu.regs[n] - 1, self.cpu.regs[m]);
-        # TODO:  self.cpu.regs[n] -= 1;
+        # self.cpu.mem.write8 (self.cpu.regs[n] - 1, self.cpu.regs[m])  # TODO: generated
+        # self.cpu.regs[n] -= 1  # TODO: generated
         self.cpu.pc += 2
     
     def MOVWM(self, m: int, n: int):
@@ -374,8 +374,8 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  Write_16 (self.cpu.regs[n] - 2, self.cpu.regs[m]);
-        # TODO:  self.cpu.regs[n] -= 2;
+        # self.cpu.mem.write16 (self.cpu.regs[n] - 2, self.cpu.regs[m])  # TODO: generated
+        # self.cpu.regs[n] -= 2  # TODO: generated
         self.cpu.pc += 2
     
     def MOVLM(self, m: int, n: int):
@@ -384,8 +384,8 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  Write_32 (self.cpu.regs[n] - 4, self.cpu.regs[m]);
-        # TODO:  self.cpu.regs[n] -= 4;
+        # self.cpu.mem.write32 (self.cpu.regs[n] - 4, self.cpu.regs[m])  # TODO: generated
+        # self.cpu.regs[n] -= 4  # TODO: generated
         self.cpu.pc += 2
     
     def MOVBL4(self, m: int, d: int):
@@ -394,12 +394,12 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param d: disp
         """
-        # TODO:  long disp = (0x0000000F & (long)d);
-        # TODO:  R[0] = Read_8 (self.cpu.regs[m] + disp);
-        # TODO:  if ((R[0] & 0x80) == 0)
-        # TODO:  R[0] &= 0x000000FF;
-        # TODO:  else
-        # TODO:  R[0] |= 0xFFFFFF00;
+        # long disp = (0x0000000F & (long)d)  # TODO: generated
+        # self.cpu.regs[0] = self.cpu.mem.read8 (self.cpu.regs[m] + disp)  # TODO: generated
+        # if ((R[0] & 0x80) == 0):  # TODO
+        #     self.cpu.regs[0] &= 0x000000FF  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[0] |= 0xFFFFFF00  # TODO: generated
         self.cpu.pc += 2
     
     def MOVWL4(self, m: int, d: int):
@@ -408,12 +408,12 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param d: disp
         """
-        # TODO:  long disp = (0x0000000F & (long)d);
-        # TODO:  R[0] = Read_16 (self.cpu.regs[m] + (disp << 1));
-        # TODO:  if ((R[0] & 0x8000) == 0)
-        # TODO:  R[0] &= 0x0000FFFF;
-        # TODO:  else
-        # TODO:  R[0] |= 0xFFFF0000;
+        # long disp = (0x0000000F & (long)d)  # TODO: generated
+        # self.cpu.regs[0] = self.cpu.mem.read16 (self.cpu.regs[m] + (disp << 1))  # TODO: generated
+        # if ((R[0] & 0x8000) == 0):  # TODO
+        #     self.cpu.regs[0] &= 0x0000FFFF  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[0] |= 0xFFFF0000  # TODO: generated
         self.cpu.pc += 2
     
     def MOVLL4(self, m: int, d: int, n: int):
@@ -423,8 +423,8 @@ class Emulator:
         :param d: disp
         :param n: register index (between 0 and 15)
         """
-        # TODO:  long disp = (0x0000000F & (long)d);
-        # TODO:  self.cpu.regs[n] = Read_32 (self.cpu.regs[m] + (disp << 2));
+        # long disp = (0x0000000F & (long)d)  # TODO: generated
+        # self.cpu.regs[n] = self.cpu.mem.read32 (self.cpu.regs[m] + (disp << 2))  # TODO: generated
         self.cpu.pc += 2
     
     def MOVBS4(self, d: int, n: int):
@@ -433,8 +433,8 @@ class Emulator:
         :param d: disp
         :param n: register index (between 0 and 15)
         """
-        # TODO:  long disp = (0x0000000F & (long)d);
-        # TODO:  Write_8 (self.cpu.regs[n] + disp, R[0]);
+        # long disp = (0x0000000F & (long)d)  # TODO: generated
+        # self.cpu.mem.write8 (self.cpu.regs[n] + disp, self.cpu.regs[0])  # TODO: generated
         self.cpu.pc += 2
     
     def MOVWS4(self, d: int, n: int):
@@ -443,8 +443,8 @@ class Emulator:
         :param d: disp
         :param n: register index (between 0 and 15)
         """
-        # TODO:  long disp = (0x0000000F & (long)d);
-        # TODO:  Write_16 (self.cpu.regs[n] + (disp << 1), R[0]);
+        # long disp = (0x0000000F & (long)d)  # TODO: generated
+        # self.cpu.mem.write16 (self.cpu.regs[n] + (disp << 1), self.cpu.regs[0])  # TODO: generated
         self.cpu.pc += 2
     
     def MOVLS4(self, m: int, d: int, n: int):
@@ -454,8 +454,8 @@ class Emulator:
         :param d: disp
         :param n: register index (between 0 and 15)
         """
-        # TODO:  long disp = (0x0000000F & (long)d);
-        # TODO:  Write_32 (self.cpu.regs[n] + (disp << 2), self.cpu.regs[m]);
+        # long disp = (0x0000000F & (long)d)  # TODO: generated
+        # self.cpu.mem.write32 (self.cpu.regs[n] + (disp << 2), self.cpu.regs[m])  # TODO: generated
         self.cpu.pc += 2
     
     def MOVBL0(self, m: int, n: int):
@@ -464,10 +464,10 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = Read_8 (self.cpu.regs[m] + R[0]);
-        # TODO:  if ((self.cpu.regs[n] & 0x80) == 0)
-        # TODO:  self.cpu.regs[n] &= 0x000000FF;
-        # TODO:  else self.cpu.regs[n] |= 0xFFFFFF00;
+        # self.cpu.regs[n] = self.cpu.mem.read8 (self.cpu.regs[m] + self.cpu.regs[0])  # TODO: generated
+        # if ((self.cpu.regs[n] & 0x80) == 0):  # TODO
+        #     self.cpu.regs[n] &= 0x000000FF  # TODO: generated
+        # else self.cpu.regs[n] |= 0xFFFFFF00  # TODO: generated
         self.cpu.pc += 2
     
     def MOVWL0(self, m: int, n: int):
@@ -476,11 +476,11 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = Read_16 (self.cpu.regs[m] + R[0]);
-        # TODO:  if ((self.cpu.regs[n] & 0x8000) == 0)
-        # TODO:  self.cpu.regs[n] &= 0x0000FFFF;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] |= 0xFFFF0000;
+        # self.cpu.regs[n] = self.cpu.mem.read16 (self.cpu.regs[m] + self.cpu.regs[0])  # TODO: generated
+        # if ((self.cpu.regs[n] & 0x8000) == 0):  # TODO
+        #     self.cpu.regs[n] &= 0x0000FFFF  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] |= 0xFFFF0000  # TODO: generated
         self.cpu.pc += 2
     
     def MOVLL0(self, m: int, n: int):
@@ -489,7 +489,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = Read_32 (self.cpu.regs[m] + R[0]);
+        # self.cpu.regs[n] = self.cpu.mem.read32 (self.cpu.regs[m] + self.cpu.regs[0])  # TODO: generated
         self.cpu.pc += 2
     
     def MOVBS0(self, m: int, n: int):
@@ -498,7 +498,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  Write_8 (self.cpu.regs[n] + R[0], self.cpu.regs[m]);
+        # self.cpu.mem.write8 (self.cpu.regs[n] + self.cpu.regs[0], self.cpu.regs[m])  # TODO: generated
         self.cpu.pc += 2
     
     def MOVWS0(self, m: int, n: int):
@@ -507,7 +507,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  Write_16 (self.cpu.regs[n] + R[0], self.cpu.regs[m]);
+        # self.cpu.mem.write16 (self.cpu.regs[n] + self.cpu.regs[0], self.cpu.regs[m])  # TODO: generated
         self.cpu.pc += 2
     
     def MOVLS0(self, m: int, n: int):
@@ -516,7 +516,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  Write_32 (self.cpu.regs[n] + R[0], self.cpu.regs[m]);
+        # self.cpu.mem.write32 (self.cpu.regs[n] + self.cpu.regs[0], self.cpu.regs[m])  # TODO: generated
         self.cpu.pc += 2
     
     def MOVBLG(self, d: int):
@@ -524,12 +524,12 @@ class Emulator:
         (disp + GBR) -> sign extension -> R0
         :param d: disp
         """
-        # TODO:  unsigned int disp = (0x000000FF & d);
-        # TODO:  R[0] = Read_8 (GBR + disp);
-        # TODO:  if ((R[0] & 0x80) == 0)
-        # TODO:  R[0] &= 0x000000FF;
-        # TODO:  else
-        # TODO:  R[0] |= 0xFFFFFF00;
+        # unsigned int disp = (0x000000FF & d)  # TODO: generated
+        # self.cpu.regs[0] = self.cpu.mem.read8 (self.cpu.regs['gbr'] + disp)  # TODO: generated
+        # if ((R[0] & 0x80) == 0):  # TODO
+        #     self.cpu.regs[0] &= 0x000000FF  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[0] |= 0xFFFFFF00  # TODO: generated
         self.cpu.pc += 2
     
     def MOVWLG(self, d: int):
@@ -537,12 +537,12 @@ class Emulator:
         (disp*2 + GBR) -> sign extension -> R0
         :param d: disp
         """
-        # TODO:  unsigned int disp = (0x000000FF & d);
-        # TODO:  R[0] = Read_16 (GBR + (disp << 1));
-        # TODO:  if ((R[0] & 0x8000) == 0)
-        # TODO:  R[0] &= 0x0000FFFF;
-        # TODO:  else
-        # TODO:  R[0] |= 0xFFFF0000;
+        # unsigned int disp = (0x000000FF & d)  # TODO: generated
+        # self.cpu.regs[0] = self.cpu.mem.read16 (self.cpu.regs['gbr'] + (disp << 1))  # TODO: generated
+        # if ((R[0] & 0x8000) == 0):  # TODO
+        #     self.cpu.regs[0] &= 0x0000FFFF  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[0] |= 0xFFFF0000  # TODO: generated
         self.cpu.pc += 2
     
     def MOVLLG(self, d: int):
@@ -550,8 +550,8 @@ class Emulator:
         (disp*4 + GBR) -> R0
         :param d: disp
         """
-        # TODO:  unsigned int disp = (0x000000FF & d);
-        # TODO:  R[0] = Read_32 (GBR + (disp << 2));
+        # unsigned int disp = (0x000000FF & d)  # TODO: generated
+        # self.cpu.regs[0] = self.cpu.mem.read32 (self.cpu.regs['gbr'] + (disp << 2))  # TODO: generated
         self.cpu.pc += 2
     
     def MOVBSG(self, d: int):
@@ -559,8 +559,8 @@ class Emulator:
         R0 -> (disp + GBR)
         :param d: disp
         """
-        # TODO:  unsigned int disp = (0x000000FF & d);
-        # TODO:  Write_8 (GBR + disp, R[0]);
+        # unsigned int disp = (0x000000FF & d)  # TODO: generated
+        # self.cpu.mem.write8 (self.cpu.regs['gbr'] + disp, self.cpu.regs[0])  # TODO: generated
         self.cpu.pc += 2
     
     def MOVWSG(self, d: int):
@@ -568,8 +568,8 @@ class Emulator:
         R0 -> (disp*2 + GBR)
         :param d: disp
         """
-        # TODO:  unsigned int disp = (0x000000FF & d);
-        # TODO:  Write_16 (GBR + (disp << 1), R[0]);
+        # unsigned int disp = (0x000000FF & d)  # TODO: generated
+        # self.cpu.mem.write16 (self.cpu.regs['gbr'] + (disp << 1), self.cpu.regs[0])  # TODO: generated
         self.cpu.pc += 2
     
     def MOVLSG(self, d: int):
@@ -577,8 +577,8 @@ class Emulator:
         R0 -> (disp*4 + GBR)
         :param d: disp
         """
-        # TODO:  unsigned int disp = (0x000000FF & (long)d);
-        # TODO:  Write_32 (GBR + (disp << 2), R[0]);
+        # unsigned int disp = (0x000000FF & (long)d)  # TODO: generated
+        # self.cpu.mem.write32 (self.cpu.regs['gbr'] + (disp << 2), self.cpu.regs[0])  # TODO: generated
         self.cpu.pc += 2
     
     def MOVT(self, n: int):
@@ -586,10 +586,10 @@ class Emulator:
         T -> Rn
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if (T == 1)
-        # TODO:  self.cpu.regs[n] = 0x00000001;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] = 0x00000000;
+        # if (T == 1):  # TODO
+        #     self.cpu.regs[n] = 0x00000001  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] = 0x00000000  # TODO: generated
         self.cpu.pc += 2
     
     def SWAPB(self, m: int, n: int):
@@ -598,11 +598,11 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  unsigned long temp0, temp1;
-        # TODO:  temp0 = self.cpu.regs[m] & 0xFFFF0000;
-        # TODO:  temp1 = (self.cpu.regs[m] & 0x000000FF) << 8;
-        # TODO:  self.cpu.regs[n] = (self.cpu.regs[m] & 0x0000FF00) >> 8;
-        # TODO:  self.cpu.regs[n] = self.cpu.regs[n] | temp1 | temp0;
+        # unsigned long temp0, temp1  # TODO: generated
+        # temp0 = self.cpu.regs[m] & 0xFFFF0000  # TODO: generated
+        # temp1 = (self.cpu.regs[m] & 0x000000FF) << 8  # TODO: generated
+        # self.cpu.regs[n] = (self.cpu.regs[m] & 0x0000FF00) >> 8  # TODO: generated
+        # self.cpu.regs[n] = self.cpu.regs[n] | temp1 | temp0  # TODO: generated
         self.cpu.pc += 2
     
     def SWAPW(self, m: int, n: int):
@@ -611,10 +611,10 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  unsigned long temp;
-        # TODO:  temp = (self.cpu.regs[m] >> 16) & 0x0000FFFF;
-        # TODO:  self.cpu.regs[n] = self.cpu.regs[m] << 16;
-        # TODO:  self.cpu.regs[n] |= temp;
+        # unsigned long temp  # TODO: generated
+        # temp = (self.cpu.regs[m] >> 16) & 0x0000FFFF  # TODO: generated
+        # self.cpu.regs[n] = self.cpu.regs[m] << 16  # TODO: generated
+        # self.cpu.regs[n] |= temp  # TODO: generated
         self.cpu.pc += 2
     
     def XTRCT(self, m: int, n: int):
@@ -623,9 +623,9 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  unsigned long high = (self.cpu.regs[m] << 16) & 0xFFFF0000;
-        # TODO:  unsigned long low = (self.cpu.regs[n] >> 16) & 0x0000FFFF;
-        # TODO:  self.cpu.regs[n] = high | low;
+        # unsigned long high = (self.cpu.regs[m] << 16) & 0xFFFF0000  # TODO: generated
+        # unsigned long low = (self.cpu.regs[n] >> 16) & 0x0000FFFF  # TODO: generated
+        # self.cpu.regs[n] = high | low  # TODO: generated
         self.cpu.pc += 2
     
     def ADD(self, m: int, n: int):
@@ -634,7 +634,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] += self.cpu.regs[m];
+        # self.cpu.regs[n] += self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def ADDI(self, i: int, n: int):
@@ -643,10 +643,10 @@ class Emulator:
         :param i: value to add (up to 0xFF)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if ((i & 0x80) == 0)
-        # TODO:  self.cpu.regs[n] += (0x000000FF & (long)i);
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] += (0xFFFFFF00 | (long)i);
+        # if ((i & 0x80) == 0):  # TODO
+        #     self.cpu.regs[n] += (0x000000FF & (long)i)  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] += (0xFFFFFF00 | (long)i)  # TODO: generated
         self.cpu.pc += 2
     
     def ADDC(self, m: int, n: int):
@@ -655,16 +655,16 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  unsigned long tmp0, tmp1;
-        # TODO:  tmp1 = self.cpu.regs[n] + self.cpu.regs[m];
-        # TODO:  tmp0 = self.cpu.regs[n];
-        # TODO:  self.cpu.regs[n] = tmp1 + T;
-        # TODO:  if (tmp0>tmp1)
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
-        # TODO:  if (tmp1 > self.cpu.regs[n])
-        # TODO:  T = 1;
+        # unsigned long tmp0, tmp1  # TODO: generated
+        # tmp1 = self.cpu.regs[n] + self.cpu.regs[m]  # TODO: generated
+        # tmp0 = self.cpu.regs[n]  # TODO: generated
+        # self.cpu.regs[n] = tmp1 + T  # TODO: generated
+        # if (tmp0>tmp1):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
+        # if (tmp1 > self.cpu.regs[n]):  # TODO
+        #     T = 1  # TODO: generated
         self.cpu.pc += 2
     
     def ADDV(self, m: int, n: int):
@@ -673,29 +673,29 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  long dest, src, ans;
-        # TODO:  if ((long)self.cpu.regs[n] >= 0)
-        # TODO:  dest = 0;
-        # TODO:  else
-        # TODO:  dest = 1;
-        # TODO:  if ((long)self.cpu.regs[m] >= 0)
-        # TODO:  src = 0;
-        # TODO:  else
-        # TODO:  src = 1;
-        # TODO:  src += dest;
-        # TODO:  self.cpu.regs[n] += self.cpu.regs[m];
-        # TODO:  if ((long)self.cpu.regs[n] >= 0)
-        # TODO:  ans = 0;
-        # TODO:  else
-        # TODO:  ans = 1;
-        # TODO:  ans += dest;
-        # TODO:  if (src == 0 || src == 2)
-        # TODO:  if (ans == 1)
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
-        # TODO:  else
-        # TODO:  T = 0;
+        # long dest, src, ans  # TODO: generated
+        # if ((long)self.cpu.regs[n] >= 0):  # TODO
+        #     dest = 0  # TODO: generated
+        # else:  # TODO
+        #     dest = 1  # TODO: generated
+        # if ((long)self.cpu.regs[m] >= 0):  # TODO
+        #     src = 0  # TODO: generated
+        # else:  # TODO
+        #     src = 1  # TODO: generated
+        # src += dest  # TODO: generated
+        # self.cpu.regs[n] += self.cpu.regs[m]  # TODO: generated
+        # if ((long)self.cpu.regs[n] >= 0):  # TODO
+        #     ans = 0  # TODO: generated
+        # else:  # TODO
+        #     ans = 1  # TODO: generated
+        # ans += dest  # TODO: generated
+        # if (src == 0 || src == 2):  # TODO
+        # if (ans == 1):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def CMPIM(self, i: int):
@@ -703,15 +703,15 @@ class Emulator:
         If R0 = (sign extension)imm: 1 -> T Else: 0 -> T
         :param i: value to add (up to 0xFF)
         """
-        # TODO:  long imm;
-        # TODO:  if ((i & 0x80) == 0)
-        # TODO:  imm = (0x000000FF & (long i));
-        # TODO:  else
-        # TODO:  imm = (0xFFFFFF00 | (long i));
-        # TODO:  if (R[0] == imm)
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
+        # long imm  # TODO: generated
+        # if ((i & 0x80) == 0):  # TODO
+        #     imm = (0x000000FF & (long i))  # TODO: generated
+        # else:  # TODO
+        #     imm = (0xFFFFFF00 | (long i))  # TODO: generated
+        # if (R[0] == imm):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def CMPEQ(self, m: int, n: int):
@@ -720,10 +720,10 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if (self.cpu.regs[n] == self.cpu.regs[m])
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
+        # if (self.cpu.regs[n] == self.cpu.regs[m]):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def CMPHI(self, m: int, n: int):
@@ -732,10 +732,10 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if ((unsigned long)self.cpu.regs[n] >= (unsigned long)self.cpu.regs[m])
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
+        # if ((unsigned long)self.cpu.regs[n] >= (unsigned long)self.cpu.regs[m]):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def CMPGE(self, m: int, n: int):
@@ -744,10 +744,10 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if ((long)self.cpu.regs[n] >= (long)self.cpu.regs[m])
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
+        # if ((long)self.cpu.regs[n] >= (long)self.cpu.regs[m]):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def CMPHI(self, m: int, n: int):
@@ -756,10 +756,10 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if ((unsigned long)self.cpu.regs[n] > (unsigned long)self.cpu.regs[m])
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
+        # if ((unsigned long)self.cpu.regs[n] > (unsigned long)self.cpu.regs[m]):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def CMPGT(self, m: int, n: int):
@@ -768,10 +768,10 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if ((long)self.cpu.regs[n] > (long)self.cpu.regs[m])
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
+        # if ((long)self.cpu.regs[n] > (long)self.cpu.regs[m]):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def CMPPL(self, n: int):
@@ -779,10 +779,10 @@ class Emulator:
         If Rn > 0 (signed): 1 -> T Else: 0 -> T
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if ((long)self.cpu.regs[n] > 0)
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
+        # if ((long)self.cpu.regs[n] > 0):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def CMPPZ(self, n: int):
@@ -790,10 +790,10 @@ class Emulator:
         If Rn >= 0 (signed): 1 -> T Else: 0 -> T
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if ((long)self.cpu.regs[n] >= 0)
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
+        # if ((long)self.cpu.regs[n] >= 0):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def CMPSTR(self, m: int, n: int):
@@ -802,18 +802,18 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  unsigned long temp;
-        # TODO:  long HH, HL, LH, LL;
-        # TODO:  temp = self.cpu.regs[n] ^ self.cpu.regs[m];
-        # TODO:  HH = (temp & 0xFF000000) >> 24;
-        # TODO:  HL = (temp & 0x00FF0000) >> 16;
-        # TODO:  LH = (temp & 0x0000FF00) >> 8;
-        # TODO:  LL = temp & 0x000000FF;
-        # TODO:  HH = HH && HL && LH && LL;
-        # TODO:  if (HH == 0)
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
+        # unsigned long temp  # TODO: generated
+        # long HH, HL, LH, LL  # TODO: generated
+        # temp = self.cpu.regs[n] ^ self.cpu.regs[m]  # TODO: generated
+        # HH = (temp & 0xFF000000) >> 24  # TODO: generated
+        # HL = (temp & 0x00FF0000) >> 16  # TODO: generated
+        # LH = (temp & 0x0000FF00) >> 8  # TODO: generated
+        # LL = temp & 0x000000FF  # TODO: generated
+        # HH = HH && HL && LH && LL  # TODO: generated
+        # if (HH == 0):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def DIV0S(self, m: int, n: int):
@@ -822,22 +822,22 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if ((self.cpu.regs[n] & 0x80000000) == 0)
-        # TODO:  Q = 0;
-        # TODO:  else
-        # TODO:  Q = 1;
-        # TODO:  if ((self.cpu.regs[m] & 0x80000000) == 0)
-        # TODO:  M = 0;
-        # TODO:  else
-        # TODO:  M = 1;
-        # TODO:  T = ! (M == Q);
+        # if ((self.cpu.regs[n] & 0x80000000) == 0):  # TODO
+        #     Q = 0  # TODO: generated
+        # else:  # TODO
+        #     Q = 1  # TODO: generated
+        # if ((self.cpu.regs[m] & 0x80000000) == 0):  # TODO
+        #     M = 0  # TODO: generated
+        # else:  # TODO
+        #     M = 1  # TODO: generated
+        # T = ! (M == Q)  # TODO: generated
         self.cpu.pc += 2
     
     def DIV0U(self):
         """
         0 -> M, 0 -> Q, 0 -> T
         """
-        # TODO:  M = Q = T = 0;
+        # M = Q = T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def DIV1(self, m: int, n: int):
@@ -846,48 +846,48 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  unsigned long tmp0, tmp2;
-        # TODO:  unsigned char old_q, tmp1;
-        # TODO:  old_q = Q;
-        # TODO:  Q = (0x80000000 & self.cpu.regs[n]) != 0;
-        # TODO:  tmp2 = self.cpu.regs[m];
-        # TODO:  self.cpu.regs[n] <<= 1;
-        # TODO:  self.cpu.regs[n] |= (unsigned long)T;
-        # TODO:  if (old_q == 0)
-        # TODO:  if (M == 0)
-        # TODO:  tmp0 = self.cpu.regs[n];
-        # TODO:  self.cpu.regs[n] -= tmp2;
-        # TODO:  tmp1 = self.cpu.regs[n] > tmp0;
-        # TODO:  if (Q == 0)
-        # TODO:  Q = tmp1;
-        # TODO:  else if (Q == 1)
-        # TODO:  Q = tmp1 == 0;
-        # TODO:  else if (M == 1)
-        # TODO:  tmp0 = self.cpu.regs[n];
-        # TODO:  self.cpu.regs[n] += tmp2;
-        # TODO:  tmp1 = self.cpu.regs[n] < tmp0;
-        # TODO:  if (Q == 0)
-        # TODO:  Q = tmp1 == 0;
-        # TODO:  else if (Q == 1)
-        # TODO:  Q = tmp1;
-        # TODO:  else if (old_q == 1)
-        # TODO:  if (M == 0)
-        # TODO:  tmp0 = self.cpu.regs[n];
-        # TODO:  self.cpu.regs[n] += tmp2;
-        # TODO:  tmp1 = self.cpu.regs[n] < tmp0;
-        # TODO:  if (Q == 0)
-        # TODO:  Q = tmp1;
-        # TODO:  else if (Q == 1)
-        # TODO:  Q = tmp1 == 0;
-        # TODO:  else if (M == 1)
-        # TODO:  tmp0 = self.cpu.regs[n];
-        # TODO:  self.cpu.regs[n] -= tmp2;
-        # TODO:  tmp1 = self.cpu.regs[n] > tmp0;
-        # TODO:  if (Q == 0)
-        # TODO:  Q = tmp1 == 0;
-        # TODO:  else if (Q == 1)
-        # TODO:  Q = tmp1;
-        # TODO:  T = (Q == M);
+        # unsigned long tmp0, tmp2  # TODO: generated
+        # unsigned char old_q, tmp1  # TODO: generated
+        # old_q = Q  # TODO: generated
+        # Q = (0x80000000 & self.cpu.regs[n]) != 0  # TODO: generated
+        # tmp2 = self.cpu.regs[m]  # TODO: generated
+        # self.cpu.regs[n] <<= 1  # TODO: generated
+        # self.cpu.regs[n] |= (unsigned long)T  # TODO: generated
+        # if (old_q == 0):  # TODO
+        # if (M == 0):  # TODO
+        #     tmp0 = self.cpu.regs[n]  # TODO: generated
+        # self.cpu.regs[n] -= tmp2  # TODO: generated
+        # tmp1 = self.cpu.regs[n] > tmp0  # TODO: generated
+        # if (Q == 0):  # TODO
+        #     Q = tmp1  # TODO: generated
+        # else if (Q == 1)  # TODO: generated
+        # Q = tmp1 == 0  # TODO: generated
+        # else if (M == 1)  # TODO: generated
+        # tmp0 = self.cpu.regs[n]  # TODO: generated
+        # self.cpu.regs[n] += tmp2  # TODO: generated
+        # tmp1 = self.cpu.regs[n] < tmp0  # TODO: generated
+        # if (Q == 0):  # TODO
+        #     Q = tmp1 == 0  # TODO: generated
+        # else if (Q == 1)  # TODO: generated
+        # Q = tmp1  # TODO: generated
+        # else if (old_q == 1)  # TODO: generated
+        # if (M == 0):  # TODO
+        #     tmp0 = self.cpu.regs[n]  # TODO: generated
+        # self.cpu.regs[n] += tmp2  # TODO: generated
+        # tmp1 = self.cpu.regs[n] < tmp0  # TODO: generated
+        # if (Q == 0):  # TODO
+        #     Q = tmp1  # TODO: generated
+        # else if (Q == 1)  # TODO: generated
+        # Q = tmp1 == 0  # TODO: generated
+        # else if (M == 1)  # TODO: generated
+        # tmp0 = self.cpu.regs[n]  # TODO: generated
+        # self.cpu.regs[n] -= tmp2  # TODO: generated
+        # tmp1 = self.cpu.regs[n] > tmp0  # TODO: generated
+        # if (Q == 0):  # TODO
+        #     Q = tmp1 == 0  # TODO: generated
+        # else if (Q == 1)  # TODO: generated
+        # Q = tmp1  # TODO: generated
+        # T = (Q == M)  # TODO: generated
         self.cpu.pc += 2
     
     def DMULS(self, m: int, n: int):
@@ -896,46 +896,46 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  unsigned long RnL, RnH, RmL, RmH, Res0, Res1, Res2;
-        # TODO:  unsigned long temp0, temp1, temp2, temp3;
-        # TODO:  long tempm, tempn, fnLmL;
-        # TODO:  tempn = (long)self.cpu.regs[n];
-        # TODO:  tempm = (long)self.cpu.regs[m];
-        # TODO:  if (tempn < 0)
-        # TODO:  tempn = 0 - tempn;
-        # TODO:  if (tempm < 0)
-        # TODO:  tempm = 0 - tempm;
-        # TODO:  if ((long)(self.cpu.regs[n] ^ self.cpu.regs[m]) < 0)
-        # TODO:  fnLmL = -1;
-        # TODO:  else
-        # TODO:  fnLmL = 0;
-        # TODO:  temp1 = (unsigned long)tempn;
-        # TODO:  temp2 = (unsigned long)tempm;
-        # TODO:  RnL = temp1 & 0x0000FFFF;
-        # TODO:  RnH = (temp1 >> 16) & 0x0000FFFF;
-        # TODO:  RmL = temp2 & 0x0000FFFF;
-        # TODO:  RmH = (temp2 >> 16) & 0x0000FFFF;
-        # TODO:  temp0 = RmL * RnL;
-        # TODO:  temp1 = RmH * RnL;
-        # TODO:  temp2 = RmL * RnH;
-        # TODO:  temp3 = RmH * RnH;
-        # TODO:  Res2 = 0;
-        # TODO:  Res1 = temp1 + temp2;
-        # TODO:  if (Res1 < temp1)
-        # TODO:  Res2 += 0x00010000;
-        # TODO:  temp1 = (Res1 << 16) & 0xFFFF0000;
-        # TODO:  Res0 = temp0 + temp1;
-        # TODO:  if (Res0 < temp0)
-        # TODO:  Res2++;
-        # TODO:  Res2 = Res2 + ((Res1 >> 16) & 0x0000FFFF) + temp3;
-        # TODO:  if (fnLmL < 0)
-        # TODO:  Res2 = ~Res2;
-        # TODO:  if (Res0 == 0)
-        # TODO:  Res2++;
-        # TODO:  else
-        # TODO:  Res0 = (~Res0) + 1;
-        # TODO:  MACH = Res2;
-        # TODO:  MACL = Res0;
+        # unsigned long RnL, RnH, RmL, RmH, Res0, Res1, Res2  # TODO: generated
+        # unsigned long temp0, temp1, temp2, temp3  # TODO: generated
+        # long tempm, tempn, fnLmL  # TODO: generated
+        # tempn = (long)self.cpu.regs[n]  # TODO: generated
+        # tempm = (long)self.cpu.regs[m]  # TODO: generated
+        # if (tempn < 0):  # TODO
+        #     tempn = 0 - tempn  # TODO: generated
+        # if (tempm < 0):  # TODO
+        #     tempm = 0 - tempm  # TODO: generated
+        # if ((long)(self.cpu.regs[n] ^ self.cpu.regs[m]) < 0):  # TODO
+        #     fnLmL = -1  # TODO: generated
+        # else:  # TODO
+        #     fnLmL = 0  # TODO: generated
+        # temp1 = (unsigned long)tempn  # TODO: generated
+        # temp2 = (unsigned long)tempm  # TODO: generated
+        # RnL = temp1 & 0x0000FFFF  # TODO: generated
+        # RnH = (temp1 >> 16) & 0x0000FFFF  # TODO: generated
+        # RmL = temp2 & 0x0000FFFF  # TODO: generated
+        # RmH = (temp2 >> 16) & 0x0000FFFF  # TODO: generated
+        # temp0 = RmL * RnL  # TODO: generated
+        # temp1 = RmH * RnL  # TODO: generated
+        # temp2 = RmL * RnH  # TODO: generated
+        # temp3 = RmH * RnH  # TODO: generated
+        # Res2 = 0  # TODO: generated
+        # Res1 = temp1 + temp2  # TODO: generated
+        # if (Res1 < temp1):  # TODO
+        #     Res2 += 0x00010000  # TODO: generated
+        # temp1 = (Res1 << 16) & 0xFFFF0000  # TODO: generated
+        # Res0 = temp0 + temp1  # TODO: generated
+        # if (Res0 < temp0):  # TODO
+        #     Res2++  # TODO: generated
+        # Res2 = Res2 + ((Res1 >> 16) & 0x0000FFFF) + temp3  # TODO: generated
+        # if (fnLmL < 0):  # TODO
+        #     Res2 = ~Res2  # TODO: generated
+        # if (Res0 == 0):  # TODO
+        #     Res2++  # TODO: generated
+        # else:  # TODO
+        #     Res0 = (~Res0) + 1  # TODO: generated
+        # MACH = Res2  # TODO: generated
+        # MACL = Res0  # TODO: generated
         self.cpu.pc += 2
     
     def DMULU(self, m: int, n: int):
@@ -944,27 +944,27 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  unsigned long RnL, RnH, RmL, RmH, Res0, Res1, Res2;
-        # TODO:  unsigned long temp0, temp1, temp2, temp3;
-        # TODO:  RnL = self.cpu.regs[n] & 0x0000FFFF;
-        # TODO:  RnH = (self.cpu.regs[n] >> 16) & 0x0000FFFF;
-        # TODO:  RmL = self.cpu.regs[m] & 0x0000FFFF;
-        # TODO:  RmH = (self.cpu.regs[m] >> 16) & 0x0000FFFF;
-        # TODO:  temp0 = RmL * RnL;
-        # TODO:  temp1 = RmH * RnL;
-        # TODO:  temp2 = RmL * RnH;
-        # TODO:  temp3 = RmH * RnH;
-        # TODO:  Res2 = 0
-        # TODO:  Res1 = temp1 + temp2;
-        # TODO:  if (Res1 < temp1)
-        # TODO:  Res2 += 0x00010000;
-        # TODO:  temp1 = (Res1 << 16) & 0xFFFF0000;
-        # TODO:  Res0 = temp0 + temp1;
-        # TODO:  if (Res0 < temp0)
-        # TODO:  Res2++;
-        # TODO:  Res2 = Res2 + ((Res1 >> 16) & 0x0000FFFF) + temp3;
-        # TODO:  MACH = Res2;
-        # TODO:  MACL = Res0;
+        # unsigned long RnL, RnH, RmL, RmH, Res0, Res1, Res2  # TODO: generated
+        # unsigned long temp0, temp1, temp2, temp3  # TODO: generated
+        # RnL = self.cpu.regs[n] & 0x0000FFFF  # TODO: generated
+        # RnH = (self.cpu.regs[n] >> 16) & 0x0000FFFF  # TODO: generated
+        # RmL = self.cpu.regs[m] & 0x0000FFFF  # TODO: generated
+        # RmH = (self.cpu.regs[m] >> 16) & 0x0000FFFF  # TODO: generated
+        # temp0 = RmL * RnL  # TODO: generated
+        # temp1 = RmH * RnL  # TODO: generated
+        # temp2 = RmL * RnH  # TODO: generated
+        # temp3 = RmH * RnH  # TODO: generated
+        # Res2 = 0  # TODO: generated
+        # Res1 = temp1 + temp2  # TODO: generated
+        # if (Res1 < temp1):  # TODO
+        #     Res2 += 0x00010000  # TODO: generated
+        # temp1 = (Res1 << 16) & 0xFFFF0000  # TODO: generated
+        # Res0 = temp0 + temp1  # TODO: generated
+        # if (Res0 < temp0):  # TODO
+        #     Res2++  # TODO: generated
+        # Res2 = Res2 + ((Res1 >> 16) & 0x0000FFFF) + temp3  # TODO: generated
+        # MACH = Res2  # TODO: generated
+        # MACL = Res0  # TODO: generated
         self.cpu.pc += 2
     
     def DT(self, n: int):
@@ -972,10 +972,10 @@ class Emulator:
         Rn-1 -> Rn If Rn = 0: 1 -> T Else: 0 -> T
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n]--;
-        # TODO:  if (self.cpu.regs[n] == 0)
-        # TODO:  T = 1;
-        # TODO:  else T = 0;
+        # self.cpu.regs[n]--  # TODO: generated
+        # if (self.cpu.regs[n] == 0):  # TODO
+        #     T = 1  # TODO: generated
+        # else T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def EXTSB(self, m: int, n: int):
@@ -984,11 +984,11 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = self.cpu.regs[m];
-        # TODO:  if ((self.cpu.regs[m] & 0x00000080) == 0)
-        # TODO:  self.cpu.regs[n] & = 0x000000FF;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] |= 0xFFFFFF00;
+        self.cpu.regs[n] = self.cpu.regs[m]
+        # if ((self.cpu.regs[m] & 0x00000080) == 0):  # TODO
+        #     self.cpu.regs[n] & = 0x000000FF  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] |= 0xFFFFFF00  # TODO: generated
         self.cpu.pc += 2
     
     def EXTSW(self, m: int, n: int):
@@ -997,11 +997,11 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = self.cpu.regs[m];
-        # TODO:  if ((self.cpu.regs[m] & 0x00008000) == 0)
-        # TODO:  self.cpu.regs[n] & = 0x0000FFFF;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] |= 0xFFFF0000;
+        self.cpu.regs[n] = self.cpu.regs[m]
+        # if ((self.cpu.regs[m] & 0x00008000) == 0):  # TODO
+        #     self.cpu.regs[n] & = 0x0000FFFF  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] |= 0xFFFF0000  # TODO: generated
         self.cpu.pc += 2
     
     def EXTUB(self, m: int, n: int):
@@ -1010,8 +1010,8 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = self.cpu.regs[m];
-        # TODO:  self.cpu.regs[n] &= 0x000000FF;
+        self.cpu.regs[n] = self.cpu.regs[m]
+        # self.cpu.regs[n] &= 0x000000FF  # TODO: generated
         self.cpu.pc += 2
     
     def EXTUW(self, m: int, n: int):
@@ -1020,8 +1020,8 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = self.cpu.regs[m];
-        # TODO:  self.cpu.regs[n] &= 0x0000FFFF;
+        self.cpu.regs[n] = self.cpu.regs[m]
+        # self.cpu.regs[n] &= 0x0000FFFF  # TODO: generated
         self.cpu.pc += 2
     
     def MACL(self, m: int, n: int):
@@ -1030,66 +1030,66 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  unsigned long RnL, RnH, RmL, RmH, Res0, Res1, Res2;
-        # TODO:  unsigned long temp0, temp1, temp2, temp3;
-        # TODO:  long tempm, tempn, fnLmL;
-        # TODO:  tempn = Read_32 (self.cpu.regs[n]);
-        # TODO:  self.cpu.regs[n] += 4;
-        # TODO:  tempm = Read_32 (self.cpu.regs[m]);
-        # TODO:  self.cpu.regs[m] += 4;
-        # TODO:  if ((long)(tempn ^ tempm) < 0)
-        # TODO:  fnLmL = -1;
-        # TODO:  else
-        # TODO:  fnLmL = 0;
-        # TODO:  if (tempn < 0)
-        # TODO:  tempn = 0 - tempn;
-        # TODO:  if (tempm < 0)
-        # TODO:  tempm = 0 - tempm;
-        # TODO:  temp1 = (unsigned long)tempn;
-        # TODO:  temp2 = (unsigned long)tempm;
-        # TODO:  RnL = temp1 & 0x0000FFFF;
-        # TODO:  RnH = (temp1 >> 16) & 0x0000FFFF;
-        # TODO:  RmL = temp2 & 0x0000FFFF;
-        # TODO:  RmH = (temp2 >> 16) & 0x0000FFFF;
-        # TODO:  temp0 = RmL * RnL;
-        # TODO:  temp1 = RmH * RnL;
-        # TODO:  temp2 = RmL * RnH;
-        # TODO:  temp3 = RmH * RnH;
-        # TODO:  Res2 = 0;
-        # TODO:  Res1 = temp1 + temp2;
-        # TODO:  if (Res1 < temp1)
-        # TODO:  Res2 += 0x00010000;
-        # TODO:  temp1 = (Res1 << 16) & 0xFFFF0000;
-        # TODO:  Res0 = temp0 + temp1;
-        # TODO:  if (Res0 < temp0)
-        # TODO:  Res2++;
-        # TODO:  Res2 = Res2 + ((Res1 >> 16) & 0x0000FFFF) + temp3;
-        # TODO:  if(fnLmL < 0)
-        # TODO:  Res2 = ~Res2;
-        # TODO:  if (Res0 == 0)
-        # TODO:  Res2++;
-        # TODO:  else
-        # TODO:  Res0 = (~Res0) + 1;
-        # TODO:  if (S == 1)
-        # TODO:  Res0 = MACL + Res0;
-        # TODO:  if (MACL > Res0)
-        # TODO:  Res2++;
-        # TODO:  Res2 += MACH & 0x0000FFFF;
-        # TODO:  if (((long)Res2 < 0) && (Res2 < 0xFFFF8000))
-        # TODO:  Res2 = 0xFFFF8000;
-        # TODO:  Res0 = 0x00000000;
-        # TODO:  if (((long)Res2 > 0) && (Res2 > 0x00007FFF))
-        # TODO:  Res2 = 0x00007FFF;
-        # TODO:  Res0 = 0xFFFFFFFF;
-        # TODO:  MACH = (Res2 & 0x0000FFFF) | (MACH & 0xFFFF0000);
-        # TODO:  MACL = Res0;
-        # TODO:  else
-        # TODO:  Res0 = MACL + Res0;
-        # TODO:  if (MACL > Res0)
-        # TODO:  Res2 ++;
-        # TODO:  Res2 += MACH;
-        # TODO:  MACH = Res2;
-        # TODO:  MACL = Res0;
+        # unsigned long RnL, RnH, RmL, RmH, Res0, Res1, Res2  # TODO: generated
+        # unsigned long temp0, temp1, temp2, temp3  # TODO: generated
+        # long tempm, tempn, fnLmL  # TODO: generated
+        # tempn = self.cpu.mem.read32 (self.cpu.regs[n])  # TODO: generated
+        # self.cpu.regs[n] += 4  # TODO: generated
+        # tempm = self.cpu.mem.read32 (self.cpu.regs[m])  # TODO: generated
+        # self.cpu.regs[m] += 4  # TODO: generated
+        # if ((long)(tempn ^ tempm) < 0):  # TODO
+        #     fnLmL = -1  # TODO: generated
+        # else:  # TODO
+        #     fnLmL = 0  # TODO: generated
+        # if (tempn < 0):  # TODO
+        #     tempn = 0 - tempn  # TODO: generated
+        # if (tempm < 0):  # TODO
+        #     tempm = 0 - tempm  # TODO: generated
+        # temp1 = (unsigned long)tempn  # TODO: generated
+        # temp2 = (unsigned long)tempm  # TODO: generated
+        # RnL = temp1 & 0x0000FFFF  # TODO: generated
+        # RnH = (temp1 >> 16) & 0x0000FFFF  # TODO: generated
+        # RmL = temp2 & 0x0000FFFF  # TODO: generated
+        # RmH = (temp2 >> 16) & 0x0000FFFF  # TODO: generated
+        # temp0 = RmL * RnL  # TODO: generated
+        # temp1 = RmH * RnL  # TODO: generated
+        # temp2 = RmL * RnH  # TODO: generated
+        # temp3 = RmH * RnH  # TODO: generated
+        # Res2 = 0  # TODO: generated
+        # Res1 = temp1 + temp2  # TODO: generated
+        # if (Res1 < temp1):  # TODO
+        #     Res2 += 0x00010000  # TODO: generated
+        # temp1 = (Res1 << 16) & 0xFFFF0000  # TODO: generated
+        # Res0 = temp0 + temp1  # TODO: generated
+        # if (Res0 < temp0):  # TODO
+        #     Res2++  # TODO: generated
+        # Res2 = Res2 + ((Res1 >> 16) & 0x0000FFFF) + temp3  # TODO: generated
+        # if(fnLmL < 0):  # TODO
+        #     Res2 = ~Res2  # TODO: generated
+        # if (Res0 == 0):  # TODO
+        #     Res2++  # TODO: generated
+        # else:  # TODO
+        #     Res0 = (~Res0) + 1  # TODO: generated
+        # if (S == 1):  # TODO
+        #     Res0 = MACL + Res0  # TODO: generated
+        # if (MACL > Res0):  # TODO
+        #     Res2++  # TODO: generated
+        # Res2 += MACH & 0x0000FFFF  # TODO: generated
+        # if (((long)Res2 < 0) && (Res2 < 0xFFFF8000)):  # TODO
+        #     Res2 = 0xFFFF8000  # TODO: generated
+        # Res0 = 0x00000000  # TODO: generated
+        # if (((long)Res2 > 0) && (Res2 > 0x00007FFF)):  # TODO
+        #     Res2 = 0x00007FFF  # TODO: generated
+        # Res0 = 0xFFFFFFFF  # TODO: generated
+        # MACH = (Res2 & 0x0000FFFF) | (MACH & 0xFFFF0000)  # TODO: generated
+        # MACL = Res0  # TODO: generated
+        # else:  # TODO
+        #     Res0 = MACL + Res0  # TODO: generated
+        # if (MACL > Res0):  # TODO
+        #     Res2 ++  # TODO: generated
+        # Res2 += MACH  # TODO: generated
+        # MACH = Res2  # TODO: generated
+        # MACL = Res0  # TODO: generated
         self.cpu.pc += 2
     
     def MACW(self, m: int, n: int):
@@ -1098,41 +1098,41 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  long tempm, tempn, dest, src, ans;
-        # TODO:  unsigned long templ;
-        # TODO:  tempn = Read_16 (self.cpu.regs[n]);
-        # TODO:  self.cpu.regs[n] += 2;
-        # TODO:  tempm = Read_16 (self.cpu.regs[m]);
-        # TODO:  self.cpu.regs[m] += 2;
-        # TODO:  templ = MACL;
-        # TODO:  tempm = ((long)(short)tempn * (long)(short)tempm);
-        # TODO:  if ((long)MACL >= 0)
-        # TODO:  dest = 0;
-        # TODO:  else
-        # TODO:  dest = 1;
-        # TODO:  if ((long)tempm >= 0)
-        # TODO:  src = 0;
-        # TODO:  tempn = 0;
-        # TODO:  else
-        # TODO:  src = 1;
-        # TODO:  tempn = 0xFFFFFFFF;
-        # TODO:  src += dest;
-        # TODO:  MACL += tempm;
-        # TODO:  if ((long)MACL >= 0)
-        # TODO:  ans = 0;
-        # TODO:  else
-        # TODO:  ans = 1;
-        # TODO:  ans += dest;
-        # TODO:  if (S == 1)
-        # TODO:  if (ans == 1)
-        # TODO:  if (src == 0)
-        # TODO:  MACL = 0x7FFFFFFF;
-        # TODO:  if (src == 2)
-        # TODO:  MACL = 0x80000000;
-        # TODO:  else
-        # TODO:  MACH += tempn;
-        # TODO:  if (templ > MACL)
-        # TODO:  MACH += 1;
+        # long tempm, tempn, dest, src, ans  # TODO: generated
+        # unsigned long templ  # TODO: generated
+        # tempn = self.cpu.mem.read16 (self.cpu.regs[n])  # TODO: generated
+        # self.cpu.regs[n] += 2  # TODO: generated
+        # tempm = self.cpu.mem.read16 (self.cpu.regs[m])  # TODO: generated
+        # self.cpu.regs[m] += 2  # TODO: generated
+        # templ = MACL  # TODO: generated
+        # tempm = ((long)(short)tempn * (long)(short)tempm)  # TODO: generated
+        # if ((long)MACL >= 0):  # TODO
+        #     dest = 0  # TODO: generated
+        # else:  # TODO
+        #     dest = 1  # TODO: generated
+        # if ((long)tempm >= 0):  # TODO
+        #     src = 0  # TODO: generated
+        # tempn = 0  # TODO: generated
+        # else:  # TODO
+        #     src = 1  # TODO: generated
+        # tempn = 0xFFFFFFFF  # TODO: generated
+        # src += dest  # TODO: generated
+        # MACL += tempm  # TODO: generated
+        # if ((long)MACL >= 0):  # TODO
+        #     ans = 0  # TODO: generated
+        # else:  # TODO
+        #     ans = 1  # TODO: generated
+        # ans += dest  # TODO: generated
+        # if (S == 1):  # TODO
+        # if (ans == 1):  # TODO
+        # if (src == 0):  # TODO
+        #     MACL = 0x7FFFFFFF  # TODO: generated
+        # if (src == 2):  # TODO
+        #     MACL = 0x80000000  # TODO: generated
+        # else:  # TODO
+        #     MACH += tempn  # TODO: generated
+        # if (templ > MACL):  # TODO
+        #     MACH += 1  # TODO: generated
         self.cpu.pc += 2
     
     def MULL(self, m: int, n: int):
@@ -1141,7 +1141,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  MACL = self.cpu.regs[n] * self.cpu.regs[m];
+        # MACL = self.cpu.regs[n] * self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def MULS(self, m: int, n: int):
@@ -1150,7 +1150,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  MACL = ((long)(short)self.cpu.regs[n] * (long)(short)self.cpu.regs[m]);
+        # MACL = ((long)(short)self.cpu.regs[n] * (long)(short)self.cpu.regs[m])  # TODO: generated
         self.cpu.pc += 2
     
     def MULU(self, m: int, n: int):
@@ -1159,7 +1159,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  MACL = ((unsigned long)(unsigned short)self.cpu.regs[n]* (unsigned long)(unsigned short)self.cpu.regs[m];
+        # MACL = ((unsigned long)(unsigned short)self.cpu.regs[n]* (unsigned long)(unsigned short)self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def NEG(self, m: int, n: int):
@@ -1168,7 +1168,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = 0 - self.cpu.regs[m];
+        # self.cpu.regs[n] = 0 - self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def NEGC(self, m: int, n: int):
@@ -1177,15 +1177,15 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  unsigned long temp;
-        # TODO:  temp = 0 - self.cpu.regs[m];
-        # TODO:  self.cpu.regs[n] = temp - T;
-        # TODO:  if (0 < temp)
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
-        # TODO:  if (temp < self.cpu.regs[n])
-        # TODO:  T = 1;
+        # unsigned long temp  # TODO: generated
+        # temp = 0 - self.cpu.regs[m]  # TODO: generated
+        # self.cpu.regs[n] = temp - T  # TODO: generated
+        # if (0 < temp):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
+        # if (temp < self.cpu.regs[n]):  # TODO
+        #     T = 1  # TODO: generated
         self.cpu.pc += 2
     
     def SUB(self, m: int, n: int):
@@ -1194,7 +1194,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] -= self.cpu.regs[m];
+        # self.cpu.regs[n] -= self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def SUBC(self, m: int, n: int):
@@ -1203,16 +1203,16 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  unsigned long tmp0, tmp1;
-        # TODO:  tmp1 = self.cpu.regs[n] - self.cpu.regs[m];
-        # TODO:  tmp0 = self.cpu.regs[n];
-        # TODO:  self.cpu.regs[n] = tmp1 - T;
-        # TODO:  if (tmp0 < tmp1)
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
-        # TODO:  if (tmp1 < self.cpu.regs[n])
-        # TODO:  T = 1;
+        # unsigned long tmp0, tmp1  # TODO: generated
+        # tmp1 = self.cpu.regs[n] - self.cpu.regs[m]  # TODO: generated
+        # tmp0 = self.cpu.regs[n]  # TODO: generated
+        # self.cpu.regs[n] = tmp1 - T  # TODO: generated
+        # if (tmp0 < tmp1):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
+        # if (tmp1 < self.cpu.regs[n]):  # TODO
+        #     T = 1  # TODO: generated
         self.cpu.pc += 2
     
     def SUBV(self, m: int, n: int):
@@ -1221,29 +1221,29 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  long dest, src, ans;
-        # TODO:  if ((long)self.cpu.regs[n] >= 0)
-        # TODO:  dest = 0;
-        # TODO:  else
-        # TODO:  dest = 1;
-        # TODO:  if ((long)self.cpu.regs[m] >= 0)
-        # TODO:  src = 0;
-        # TODO:  else
-        # TODO:  src = 1;
-        # TODO:  src += dest;
-        # TODO:  self.cpu.regs[n] -= self.cpu.regs[m];
-        # TODO:  if ((long)self.cpu.regs[n] >= 0)
-        # TODO:  ans = 0;
-        # TODO:  else
-        # TODO:  ans = 1;
-        # TODO:  ans += dest;
-        # TODO:  if (src == 1)
-        # TODO:  if (ans == 1)
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
-        # TODO:  else
-        # TODO:  T = 0;
+        # long dest, src, ans  # TODO: generated
+        # if ((long)self.cpu.regs[n] >= 0):  # TODO
+        #     dest = 0  # TODO: generated
+        # else:  # TODO
+        #     dest = 1  # TODO: generated
+        # if ((long)self.cpu.regs[m] >= 0):  # TODO
+        #     src = 0  # TODO: generated
+        # else:  # TODO
+        #     src = 1  # TODO: generated
+        # src += dest  # TODO: generated
+        # self.cpu.regs[n] -= self.cpu.regs[m]  # TODO: generated
+        # if ((long)self.cpu.regs[n] >= 0):  # TODO
+        #     ans = 0  # TODO: generated
+        # else:  # TODO
+        #     ans = 1  # TODO: generated
+        # ans += dest  # TODO: generated
+        # if (src == 1):  # TODO
+        # if (ans == 1):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def AND(self, m: int, n: int):
@@ -1252,7 +1252,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] &= self.cpu.regs[m];
+        # self.cpu.regs[n] &= self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def ANDI(self, i: int):
@@ -1260,7 +1260,7 @@ class Emulator:
         R0 & (zero extend)imm -> R0
         :param i: value to add (up to 0xFF)
         """
-        # TODO:  R[0] &= (0x000000FF & (long)i);
+        # self.cpu.regs[0] &= (0x000000FF & (long)i)  # TODO: generated
         self.cpu.pc += 2
     
     def ANDM(self, i: int):
@@ -1268,9 +1268,9 @@ class Emulator:
         (R0 + GBR) & (zero extend)imm -> (R0 + GBR)
         :param i: value to add (up to 0xFF)
         """
-        # TODO:  long temp = Read_8 (GBR + R[0]);
-        # TODO:  temp &= 0x000000FF & (long)i;
-        # TODO:  Write_8 (GBR + R[0], temp);
+        # long temp = self.cpu.mem.read8 (self.cpu.regs['gbr'] + self.cpu.regs[0])  # TODO: generated
+        # temp &= 0x000000FF & (long)i  # TODO: generated
+        # self.cpu.mem.write8 (self.cpu.regs['gbr'] + self.cpu.regs[0], temp)  # TODO: generated
         self.cpu.pc += 2
     
     def NOT(self, m: int, n: int):
@@ -1279,7 +1279,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = ~self.cpu.regs[m];
+        # self.cpu.regs[n] = ~self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def OR(self, m: int, n: int):
@@ -1288,7 +1288,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] |= self.cpu.regs[m];
+        # self.cpu.regs[n] |= self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def ORI(self, i: int):
@@ -1296,7 +1296,7 @@ class Emulator:
         R0 | (zero extend)imm -> R0
         :param i: value to add (up to 0xFF)
         """
-        # TODO:  R[0] |= (0x000000FF & (long)i);
+        # self.cpu.regs[0] |= (0x000000FF & (long)i)  # TODO: generated
         self.cpu.pc += 2
     
     def ORM(self, i: int):
@@ -1304,9 +1304,9 @@ class Emulator:
         (R0 + GBR) | (zero extend)imm -> (R0 + GBR)
         :param i: value to add (up to 0xFF)
         """
-        # TODO:  long temp = Read_8 (GBR + R[0]);
-        # TODO:  temp |= (0x000000FF & (long)i);
-        # TODO:  Write_8 (GBR + R[0], temp);
+        # long temp = self.cpu.mem.read8 (self.cpu.regs['gbr'] + self.cpu.regs[0])  # TODO: generated
+        # temp |= (0x000000FF & (long)i)  # TODO: generated
+        # self.cpu.mem.write8 (self.cpu.regs['gbr'] + self.cpu.regs[0], temp)  # TODO: generated
         self.cpu.pc += 2
     
     def TAS(self, n: int):
@@ -1314,13 +1314,13 @@ class Emulator:
         If (Rn) = 0: 1 -> T Else: 0 -> T 1 -> MSB of (Rn)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  int temp = Read_8 (self.cpu.regs[n]); // Bus Lock
-        # TODO:  if (temp == 0)
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
-        # TODO:  temp |= 0x00000080;
-        # TODO:  Write_8 (self.cpu.regs[n], temp);  // Bus unlock
+        # int temp = self.cpu.mem.read8 (self.cpu.regs[n]); // Bus Lock  # TODO: generated
+        # if (temp == 0):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
+        # temp |= 0x00000080  # TODO: generated
+        # self.cpu.mem.write8 (self.cpu.regs[n], temp);  // Bus unlock  # TODO: generated
         self.cpu.pc += 2
     
     def TST(self, m: int, n: int):
@@ -1329,10 +1329,10 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if ((self.cpu.regs[n] & self.cpu.regs[m]) == 0)
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
+        # if ((self.cpu.regs[n] & self.cpu.regs[m]) == 0):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def TSTI(self, i: int):
@@ -1340,11 +1340,11 @@ class Emulator:
         If R0 & (zero extend)imm = 0: 1 -> T Else: 0 -> T
         :param i: value to add (up to 0xFF)
         """
-        # TODO:  long temp = R[0] & (0x000000FF & (long)i);
-        # TODO:  if (temp == 0)
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
+        # long temp = self.cpu.regs[0] & (0x000000FF & (long)i)  # TODO: generated
+        # if (temp == 0):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def TSTM(self, i: int):
@@ -1352,12 +1352,12 @@ class Emulator:
         If (R0 + GBR) & (zero extend)imm = 0: 1 -> T Else 0: -> T
         :param i: value to add (up to 0xFF)
         """
-        # TODO:  long temp = Read_8 (GBR + R[0]);
-        # TODO:  temp &= (0x000000FF & (long)i);
-        # TODO:  if (temp == 0)
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
+        # long temp = self.cpu.mem.read8 (self.cpu.regs['gbr'] + self.cpu.regs[0])  # TODO: generated
+        # temp &= (0x000000FF & (long)i)  # TODO: generated
+        # if (temp == 0):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def XOR(self, m: int, n: int):
@@ -1366,7 +1366,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] ^= self.cpu.regs[m];
+        # self.cpu.regs[n] ^= self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def XORI(self, i: int):
@@ -1374,7 +1374,7 @@ class Emulator:
         R0 ^ (zero extend)imm -> R0
         :param i: value to add (up to 0xFF)
         """
-        # TODO:  R[0] ^= (0x000000FF & (long)i);
+        # self.cpu.regs[0] ^= (0x000000FF & (long)i)  # TODO: generated
         self.cpu.pc += 2
     
     def XORM(self, i: int):
@@ -1382,9 +1382,9 @@ class Emulator:
         (R0 + GBR) ^ (zero extend)imm -> (R0 + GBR)
         :param i: value to add (up to 0xFF)
         """
-        # TODO:  int temp = Read_8 (GBR + R[0]);
-        # TODO:  temp ^= (0x000000FF & (long)i);
-        # TODO:  Write_8 (GBR + R[0], temp);
+        # int temp = self.cpu.mem.read8 (self.cpu.regs['gbr'] + self.cpu.regs[0])  # TODO: generated
+        # temp ^= (0x000000FF & (long)i)  # TODO: generated
+        # self.cpu.mem.write8 (self.cpu.regs['gbr'] + self.cpu.regs[0], temp)  # TODO: generated
         self.cpu.pc += 2
     
     def ROTCL(self, n: int):
@@ -1392,20 +1392,20 @@ class Emulator:
         T << Rn << T
         :param n: register index (between 0 and 15)
         """
-        # TODO:  long temp;
-        # TODO:  if ((self.cpu.regs[n] & 0x80000000) == 0)
-        # TODO:  temp = 0;
-        # TODO:  else
-        # TODO:  temp = 1;
-        # TODO:  self.cpu.regs[n] <<= 1;
-        # TODO:  if (T == 1)
-        # TODO:  self.cpu.regs[n] |= 0x00000001;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] &= 0xFFFFFFFE;
-        # TODO:  if (temp == 1)
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
+        # long temp  # TODO: generated
+        # if ((self.cpu.regs[n] & 0x80000000) == 0):  # TODO
+        #     temp = 0  # TODO: generated
+        # else:  # TODO
+        #     temp = 1  # TODO: generated
+        # self.cpu.regs[n] <<= 1  # TODO: generated
+        # if (T == 1):  # TODO
+        #     self.cpu.regs[n] |= 0x00000001  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] &= 0xFFFFFFFE  # TODO: generated
+        # if (temp == 1):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def ROTCR(self, n: int):
@@ -1413,20 +1413,20 @@ class Emulator:
         T >> Rn >> T
         :param n: register index (between 0 and 15)
         """
-        # TODO:  long temp;
-        # TODO:  if ((self.cpu.regs[n] & 0x00000001) == 0)
-        # TODO:  temp = 0;
-        # TODO:  else
-        # TODO:  temp = 1;
-        # TODO:  self.cpu.regs[n] >>= 1;
-        # TODO:  if (T == 1)
-        # TODO:  self.cpu.regs[n] |= 0x80000000;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] &= 0x7FFFFFFF;
-        # TODO:  if (temp == 1)
-        # TODO:  T = 1;
-        # TODO:  else
-        # TODO:  T = 0;
+        # long temp  # TODO: generated
+        # if ((self.cpu.regs[n] & 0x00000001) == 0):  # TODO
+        #     temp = 0  # TODO: generated
+        # else:  # TODO
+        #     temp = 1  # TODO: generated
+        # self.cpu.regs[n] >>= 1  # TODO: generated
+        # if (T == 1):  # TODO
+        #     self.cpu.regs[n] |= 0x80000000  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] &= 0x7FFFFFFF  # TODO: generated
+        # if (temp == 1):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def ROTL(self, n: int):
@@ -1434,15 +1434,15 @@ class Emulator:
         T << Rn << MSB
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if ((self.cpu.regs[n] & 0x80000000) == 0)
-        # TODO:  T = 0;
-        # TODO:  else
-        # TODO:  T = 1;
-        # TODO:  self.cpu.regs[n] <<= 1;
-        # TODO:  if (T == 1)
-        # TODO:  self.cpu.regs[n] |= 0x00000001;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] &= 0xFFFFFFFE;
+        # if ((self.cpu.regs[n] & 0x80000000) == 0):  # TODO
+        #     T = 0  # TODO: generated
+        # else:  # TODO
+        #     T = 1  # TODO: generated
+        # self.cpu.regs[n] <<= 1  # TODO: generated
+        # if (T == 1):  # TODO
+        #     self.cpu.regs[n] |= 0x00000001  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] &= 0xFFFFFFFE  # TODO: generated
         self.cpu.pc += 2
     
     def ROTR(self, n: int):
@@ -1450,15 +1450,15 @@ class Emulator:
         LSB >> Rn >> T
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if ((self.cpu.regs[n] & 0x00000001) == 0)
-        # TODO:  T = 0;
-        # TODO:  else
-        # TODO:  T = 1;
-        # TODO:  self.cpu.regs[n] >>= 1;
-        # TODO:  if (T == 1)
-        # TODO:  self.cpu.regs[n] |= 0x80000000;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] &= 0x7FFFFFFF;
+        # if ((self.cpu.regs[n] & 0x00000001) == 0):  # TODO
+        #     T = 0  # TODO: generated
+        # else:  # TODO
+        #     T = 1  # TODO: generated
+        # self.cpu.regs[n] >>= 1  # TODO: generated
+        # if (T == 1):  # TODO
+        #     self.cpu.regs[n] |= 0x80000000  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] &= 0x7FFFFFFF  # TODO: generated
         self.cpu.pc += 2
     
     def SHAD(self, m: int, n: int):
@@ -1467,16 +1467,16 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  int sgn = self.cpu.regs[m] & 0x80000000;
-        # TODO:  if (sgn == 0)
-        # TODO:  self.cpu.regs[n] <<= (self.cpu.regs[m] & 0x1F);
-        # TODO:  else if ((self.cpu.regs[m] & 0x1F) == 0)
-        # TODO:  if ((self.cpu.regs[n] & 0x80000000) == 0)
-        # TODO:  self.cpu.regs[n] = 0;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] = 0xFFFFFFFF;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] = (long)self.cpu.regs[n] >> ((~self.cpu.regs[m] & 0x1F) + 1);
+        # int sgn = self.cpu.regs[m] & 0x80000000  # TODO: generated
+        # if (sgn == 0):  # TODO
+        #     self.cpu.regs[n] <<= (self.cpu.regs[m] & 0x1F)  # TODO: generated
+        # else if ((self.cpu.regs[m] & 0x1F) == 0)  # TODO: generated
+        # if ((self.cpu.regs[n] & 0x80000000) == 0):  # TODO
+        #     self.cpu.regs[n] = 0  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] = 0xFFFFFFFF  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] = (long)self.cpu.regs[n] >> ((~self.cpu.regs[m] & 0x1F) + 1)  # TODO: generated
         self.cpu.pc += 2
     
     def SHAL(self, n: int):
@@ -1484,11 +1484,11 @@ class Emulator:
         T << Rn << 0
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if ((self.cpu.regs[n] & 0x80000000) == 0)
-        # TODO:  T = 0;
-        # TODO:  else
-        # TODO:  T = 1;
-        # TODO:  self.cpu.regs[n] <<= 1;
+        # if ((self.cpu.regs[n] & 0x80000000) == 0):  # TODO
+        #     T = 0  # TODO: generated
+        # else:  # TODO
+        #     T = 1  # TODO: generated
+        # self.cpu.regs[n] <<= 1  # TODO: generated
         self.cpu.pc += 2
     
     def SHAR(self, n: int):
@@ -1496,20 +1496,20 @@ class Emulator:
         MSB >> Rn >> T
         :param n: register index (between 0 and 15)
         """
-        # TODO:  long temp;
-        # TODO:  if ((self.cpu.regs[n] & 0x00000001) == 0)
-        # TODO:  T = 0;
-        # TODO:  else
-        # TODO:  T = 1;
-        # TODO:  if ((self.cpu.regs[n] & 0x80000000) == 0)
-        # TODO:  temp = 0;
-        # TODO:  else
-        # TODO:  temp = 1;
-        # TODO:  self.cpu.regs[n] >>= 1;
-        # TODO:  if (temp == 1)
-        # TODO:  self.cpu.regs[n] |= 0x80000000;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] &= 0x7FFFFFFF;
+        # long temp  # TODO: generated
+        # if ((self.cpu.regs[n] & 0x00000001) == 0):  # TODO
+        #     T = 0  # TODO: generated
+        # else:  # TODO
+        #     T = 1  # TODO: generated
+        # if ((self.cpu.regs[n] & 0x80000000) == 0):  # TODO
+        #     temp = 0  # TODO: generated
+        # else:  # TODO
+        #     temp = 1  # TODO: generated
+        # self.cpu.regs[n] >>= 1  # TODO: generated
+        # if (temp == 1):  # TODO
+        #     self.cpu.regs[n] |= 0x80000000  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] &= 0x7FFFFFFF  # TODO: generated
         self.cpu.pc += 2
     
     def SHLD(self, m: int, n: int):
@@ -1518,13 +1518,13 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  int sgn = self.cpu.regs[m] & 0x80000000;
-        # TODO:  if (sgn == 0)
-        # TODO:  self.cpu.regs[n] <<= (self.cpu.regs[m] & 0x1F);
-        # TODO:  else if ((self.cpu.regs[m] & 0x1F) == 0)
-        # TODO:  self.cpu.regs[n] = 0;
-        # TODO:  else
-        # TODO:  self.cpu.regs[n] = (unsigned)self.cpu.regs[n] >> ((~self.cpu.regs[m] & 0x1F) + 1);
+        # int sgn = self.cpu.regs[m] & 0x80000000  # TODO: generated
+        # if (sgn == 0):  # TODO
+        #     self.cpu.regs[n] <<= (self.cpu.regs[m] & 0x1F)  # TODO: generated
+        # else if ((self.cpu.regs[m] & 0x1F) == 0)  # TODO: generated
+        # self.cpu.regs[n] = 0  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.regs[n] = (unsigned)self.cpu.regs[n] >> ((~self.cpu.regs[m] & 0x1F) + 1)  # TODO: generated
         self.cpu.pc += 2
     
     def SHLL(self, n: int):
@@ -1532,11 +1532,11 @@ class Emulator:
         T << Rn << 0
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if ((self.cpu.regs[n] & 0x80000000) == 0)
-        # TODO:  T = 0;
-        # TODO:  else
-        # TODO:  T = 1;
-        # TODO:  self.cpu.regs[n] <<= 1;
+        # if ((self.cpu.regs[n] & 0x80000000) == 0):  # TODO
+        #     T = 0  # TODO: generated
+        # else:  # TODO
+        #     T = 1  # TODO: generated
+        # self.cpu.regs[n] <<= 1  # TODO: generated
         self.cpu.pc += 2
     
     def SHLL2(self, n: int):
@@ -1544,7 +1544,7 @@ class Emulator:
         Rn << 2 -> Rn
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] <<= 2;
+        # self.cpu.regs[n] <<= 2  # TODO: generated
         self.cpu.pc += 2
     
     def SHLL8(self, n: int):
@@ -1552,7 +1552,7 @@ class Emulator:
         Rn << 8 -> Rn
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] <<= 8;
+        # self.cpu.regs[n] <<= 8  # TODO: generated
         self.cpu.pc += 2
     
     def SHLL16(self, n: int):
@@ -1560,7 +1560,7 @@ class Emulator:
         Rn << 16 -> Rn
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] <<= 16;
+        # self.cpu.regs[n] <<= 16  # TODO: generated
         self.cpu.pc += 2
     
     def SHLR(self, n: int):
@@ -1568,12 +1568,12 @@ class Emulator:
         0 >> Rn >> T
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if ((self.cpu.regs[n] & 0x00000001) == 0)
-        # TODO:  T = 0;
-        # TODO:  else
-        # TODO:  T = 1;
-        # TODO:  self.cpu.regs[n] >>= 1;
-        # TODO:  self.cpu.regs[n] &= 0x7FFFFFFF;
+        # if ((self.cpu.regs[n] & 0x00000001) == 0):  # TODO
+        #     T = 0  # TODO: generated
+        # else:  # TODO
+        #     T = 1  # TODO: generated
+        # self.cpu.regs[n] >>= 1  # TODO: generated
+        # self.cpu.regs[n] &= 0x7FFFFFFF  # TODO: generated
         self.cpu.pc += 2
     
     def SHLR2(self, n: int):
@@ -1581,8 +1581,8 @@ class Emulator:
         Rn >> 2 -> [0 -> Rn]
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] >>= 2;
-        # TODO:  self.cpu.regs[n] &= 0x3FFFFFFF;
+        # self.cpu.regs[n] >>= 2  # TODO: generated
+        # self.cpu.regs[n] &= 0x3FFFFFFF  # TODO: generated
         self.cpu.pc += 2
     
     def SHLR8(self, n: int):
@@ -1590,8 +1590,8 @@ class Emulator:
         Rn >> 8 -> [0 -> Rn]
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] >>= 8;
-        # TODO:  self.cpu.regs[n] &= 0x00FFFFFF;
+        # self.cpu.regs[n] >>= 8  # TODO: generated
+        # self.cpu.regs[n] &= 0x00FFFFFF  # TODO: generated
         self.cpu.pc += 2
     
     def SHLR16(self, n: int):
@@ -1599,8 +1599,8 @@ class Emulator:
         Rn >> 16 -> [0 -> Rn]
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] >>= 16;
-        # TODO:  self.cpu.regs[n] &= 0x0000FFFF;
+        # self.cpu.regs[n] >>= 16  # TODO: generated
+        # self.cpu.regs[n] &= 0x0000FFFF  # TODO: generated
         self.cpu.pc += 2
     
     def BF(self, d: int):
@@ -1608,94 +1608,91 @@ class Emulator:
         If T = 0: disp*2 + PC + 4 -> PC Else: nop
         :param d: disp
         """
-        # TODO:  int disp;
-        # TODO:  if ((d & 0x80) == 0)
-        # TODO:  disp = (0x000000FF & d);
-        # TODO:  else
-        # TODO:  disp = (0xFFFFFF00 | d);
-        # TODO:  if (T == 0)
-        # TODO:  PC = PC + 4 + (disp << 1);
-        # TODO:  else
-        self.cpu.pc += 2
+        # int disp  # TODO: generated
+        # if ((d & 0x80) == 0):  # TODO
+        #     disp = (0x000000FF & d)  # TODO: generated
+        # else:  # TODO
+        #     disp = (0xFFFFFF00 | d)  # TODO: generated
+        # if (T == 0):  # TODO
+        #     self.cpu.pc = self.cpu.pc + 4 + (disp << 1)  # TODO: generated
+        # else:  # TODO
+            self.cpu.pc += 2
     
     def BFS(self, d: int):
         """
         If T = 0: disp*2 + PC + 4 -> PC Else: nop (Delayed branch)
         :param d: disp
         """
-        # TODO:  int disp;
-        # TODO:  unsigned int temp;
-        # TODO:  temp = PC;
-        # TODO:  if ((d & 0x80) == 0)
-        # TODO:  disp = (0x000000FF & d);
-        # TODO:  else
-        # TODO:  disp = (0xFFFFFF00 | d);
-        # TODO:  if (T == 0)
-        # TODO:  PC = PC + 4 + (disp << 1);
-        # TODO:  else
-        # TODO:  PC += 4;
-        # TODO:  Delay_Slot (temp + 2);
-        pass  # TODO: Implement me !
+        # int disp  # TODO: generated
+        # unsigned int temp  # TODO: generated
+        # temp = self.cpu.pc  # TODO: generated
+        # if ((d & 0x80) == 0):  # TODO
+        #     disp = (0x000000FF & d)  # TODO: generated
+        # else:  # TODO
+        #     disp = (0xFFFFFF00 | d)  # TODO: generated
+        # if (T == 0):  # TODO
+        #     self.cpu.pc = self.cpu.pc + 4 + (disp << 1)  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.pc += 4  # TODO: generated
+        # self.cpu.delay_slot(temp + 2)  # TODO: generated
     
     def BT(self, d: int):
         """
         If T = 1: disp*2 + PC + 4 -> PC Else: nop
         :param d: disp
         """
-        # TODO:  int disp;
-        # TODO:  if ((d & 0x80) == 0)
-        # TODO:  disp = (0x000000FF & d);
-        # TODO:  else
-        # TODO:  disp = (0xFFFFFF00 | d);
-        # TODO:  if (T == 1)
-        # TODO:  PC = PC + 4 + (disp << 1);
-        # TODO:  else
-        self.cpu.pc += 2
+        # int disp  # TODO: generated
+        # if ((d & 0x80) == 0):  # TODO
+        #     disp = (0x000000FF & d)  # TODO: generated
+        # else:  # TODO
+        #     disp = (0xFFFFFF00 | d)  # TODO: generated
+        # if (T == 1):  # TODO
+        #     self.cpu.pc = self.cpu.pc + 4 + (disp << 1)  # TODO: generated
+        # else:  # TODO
+            self.cpu.pc += 2
     
     def BTS(self, d: int):
         """
         If T = 1: disp*2 + PC + 4 -> PC Else: nop (Delayed branch)
         :param d: disp
         """
-        # TODO:  int disp;
-        # TODO:  unsigned temp;
-        # TODO:  temp = PC;
-        # TODO:  if ((d & 0x80) == 0)
-        # TODO:  disp = (0x000000FF & d);
-        # TODO:  else
-        # TODO:  disp = (0xFFFFFF00 | d);
-        # TODO:  if (T == 1)
-        # TODO:  PC = PC + 4 + (disp << 1);
-        # TODO:  else
-        # TODO:  PC += 4;
-        # TODO:  Delay_Slot (temp + 2);
-        pass  # TODO: Implement me !
+        # int disp  # TODO: generated
+        # unsigned temp  # TODO: generated
+        # temp = self.cpu.pc  # TODO: generated
+        # if ((d & 0x80) == 0):  # TODO
+        #     disp = (0x000000FF & d)  # TODO: generated
+        # else:  # TODO
+        #     disp = (0xFFFFFF00 | d)  # TODO: generated
+        # if (T == 1):  # TODO
+        #     self.cpu.pc = self.cpu.pc + 4 + (disp << 1)  # TODO: generated
+        # else:  # TODO
+        #     self.cpu.pc += 4  # TODO: generated
+        # self.cpu.delay_slot(temp + 2)  # TODO: generated
     
     def BRA(self, d: int):
         """
         disp*2 + PC + 4 -> PC (Delayed branch)
         :param d: disp
         """
-        # TODO:  int disp;
-        # TODO:  unsigned int temp;
-        # TODO:  temp = PC;
-        # TODO:  if ((d & 0x800) == 0)
-        # TODO:  disp = (0x00000FFF & d);
-        # TODO:  else
-        # TODO:  disp = (0xFFFFF000 | d);
-        # TODO:  PC = PC + 4 + (disp << 1);
-        # TODO:  Delay_Slot(temp + 2);
-        pass  # TODO: Implement me !
+        # int disp  # TODO: generated
+        # unsigned int temp  # TODO: generated
+        # temp = self.cpu.pc  # TODO: generated
+        # if ((d & 0x800) == 0):  # TODO
+        #     disp = (0x00000FFF & d)  # TODO: generated
+        # else:  # TODO
+        #     disp = (0xFFFFF000 | d)  # TODO: generated
+        # self.cpu.pc = self.cpu.pc + 4 + (disp << 1)  # TODO: generated
+        # Delay_Slot(temp + 2)  # TODO: generated
     
     def BRAF(self, m: int):
         """
         Rm + PC + 4 -> PC (Delayed branch)
         :param m: register index (between 0 and 15)
         """
-        # TODO:  unsigned int temp;
-        # TODO:  temp = PC;
-        # TODO:  PC = PC + 4 + self.cpu.regs[m];
-        # TODO:  Delay_Slot (temp + 2);
+        # unsigned int temp  # TODO: generated
+        # temp = self.cpu.pc  # TODO: generated
+        # self.cpu.pc = self.cpu.pc + 4 + self.cpu.regs[m]  # TODO: generated
+        # self.cpu.delay_slot(temp + 2)  # TODO: generated
         pass  # TODO: Implement me !
     
     def BSR(self, d: int):
@@ -1703,28 +1700,27 @@ class Emulator:
         PC + 4 -> PR, disp*2 + PC + 4 -> PC (Delayed branch)
         :param d: disp
         """
-        # TODO:  int disp;
-        # TODO:  unsigned int temp;
-        # TODO:  temp = PC;
-        # TODO:  if ((d & 0x800) == 0)
-        # TODO:  disp = (0x00000FFF & d);
-        # TODO:  else
-        # TODO:  disp = (0xFFFFF000 | d);
-        # TODO:  PR = PC + 4;
-        # TODO:  PC = PC + 4 + (disp << 1);
-        # TODO:  Delay_Slot (temp + 2);
-        pass  # TODO: Implement me !
+        # int disp  # TODO: generated
+        # unsigned int temp  # TODO: generated
+        # temp = self.cpu.pc  # TODO: generated
+        # if ((d & 0x800) == 0):  # TODO
+        #     disp = (0x00000FFF & d)  # TODO: generated
+        # else:  # TODO
+        #     disp = (0xFFFFF000 | d)  # TODO: generated
+        # PR = self.cpu.pc + 4  # TODO: generated
+        # self.cpu.pc = self.cpu.pc + 4 + (disp << 1)  # TODO: generated
+        # self.cpu.delay_slot(temp + 2)  # TODO: generated
     
     def BSRF(self, m: int):
         """
         PC + 4 -> PR, Rm + PC + 4 -> PC (Delayed branch)
         :param m: register index (between 0 and 15)
         """
-        # TODO:  unsigned int temp;
-        # TODO:  temp = PC;
-        # TODO:  PR = PC + 4;
-        # TODO:  PC = PC + 4 + self.cpu.regs[m];
-        # TODO:  Delay_Slot (temp + 2);
+        # unsigned int temp  # TODO: generated
+        # temp = self.cpu.pc  # TODO: generated
+        # PR = self.cpu.pc + 4  # TODO: generated
+        # self.cpu.pc = self.cpu.pc + 4 + self.cpu.regs[m]  # TODO: generated
+        # self.cpu.delay_slot(temp + 2)  # TODO: generated
         pass  # TODO: Implement me !
     
     def JMP(self, m: int):
@@ -1732,10 +1728,10 @@ class Emulator:
         Rm -> PC (Delayed branch)
         :param m: register index (between 0 and 15)
         """
-        # TODO:  unsigned int temp;
-        # TODO:  temp = PC;
-        # TODO:  PC = self.cpu.regs[m];
-        # TODO:  Delay_Slot (temp + 2);
+        # unsigned int temp  # TODO: generated
+        # temp = self.cpu.pc  # TODO: generated
+        # self.cpu.pc = self.cpu.regs[m]  # TODO: generated
+        # self.cpu.delay_slot(temp + 2)  # TODO: generated
         pass  # TODO: Implement me !
     
     def JSR(self, m: int):
@@ -1743,43 +1739,43 @@ class Emulator:
         PC + 4 -> PR, Rm -> PC (Delayed branch)
         :param m: register index (between 0 and 15)
         """
-        # TODO:  unsigned int temp;
-        # TODO:  temp = PC;
-        # TODO:  PR = PC + 4;
-        # TODO:  PC = self.cpu.regs[m];
-        # TODO:  Delay_Slot (temp + 2);
+        # unsigned int temp  # TODO: generated
+        # temp = self.cpu.pc  # TODO: generated
+        # PR = self.cpu.pc + 4  # TODO: generated
+        # self.cpu.pc = self.cpu.regs[m]  # TODO: generated
+        # self.cpu.delay_slot(temp + 2)  # TODO: generated
         pass  # TODO: Implement me !
     
     def RTS(self):
         """
         PR -> PC Delayed branch
         """
-        # TODO:  unsigned int temp;
-        # TODO:  temp = PC;
-        # TODO:  PC = PR;
-        # TODO:  Delay_Slot (temp + 2);
+        # unsigned int temp  # TODO: generated
+        # temp = self.cpu.pc  # TODO: generated
+        # self.cpu.pc = PR  # TODO: generated
+        # self.cpu.delay_slot(temp + 2)  # TODO: generated
         pass  # TODO: Implement me !
     
     def CLRMAC(self):
         """
         0 -> MACH, 0 -> MACL
         """
-        # TODO:  MACH = 0;
-        # TODO:  MACL = 0;
+        # MACH = 0  # TODO: generated
+        # MACL = 0  # TODO: generated
         self.cpu.pc += 2
     
     def CLRS(self):
         """
         0 -> S
         """
-        # TODO:  S = 0;
+        # S = 0  # TODO: generated
         self.cpu.pc += 2
     
     def CLRT(self):
         """
         0 -> T
         """
-        # TODO:  T = 0;
+        # T = 0  # TODO: generated
         self.cpu.pc += 2
     
     def LDCSR(self, m: int):
@@ -1787,7 +1783,7 @@ class Emulator:
         Rm -> SR
         :param m: register index (between 0 and 15)
         """
-        # TODO:  SR = self.cpu.regs[m] & 0x700083F3;
+        # SR = self.cpu.regs[m] & 0x700083F3  # TODO: generated
         self.cpu.pc += 2
     
     def LDCMSR(self, m: int):
@@ -1795,8 +1791,8 @@ class Emulator:
         (Rm) -> SR, Rm+4 -> Rm
         :param m: register index (between 0 and 15)
         """
-        # TODO:  SR = Read_32 (self.cpu.regs[m]) & 0x700083F3;
-        # TODO:  self.cpu.regs[m] += 4;
+        # SR = self.cpu.mem.read32 (self.cpu.regs[m]) & 0x700083F3  # TODO: generated
+        # self.cpu.regs[m] += 4  # TODO: generated
         self.cpu.pc += 2
     
     def LDCGBR(self, m: int):
@@ -1804,7 +1800,7 @@ class Emulator:
         Rm -> GBR
         :param m: register index (between 0 and 15)
         """
-        # TODO:  GBR = self.cpu.regs[m];
+        # self.cpu.regs['gbr'] = self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def LDCMGBR(self, m: int):
@@ -1812,8 +1808,8 @@ class Emulator:
         (Rm) -> GBR, Rm+4 -> Rm
         :param m: register index (between 0 and 15)
         """
-        # TODO:  GBR = Read_32 (self.cpu.regs[m]);
-        # TODO:  self.cpu.regs[m] += 4;
+        # self.cpu.regs['gbr'] = self.cpu.mem.read32 (self.cpu.regs[m])  # TODO: generated
+        # self.cpu.regs[m] += 4  # TODO: generated
         self.cpu.pc += 2
     
     def LDCVBR(self, m: int):
@@ -1821,7 +1817,7 @@ class Emulator:
         Rm -> VBR
         :param m: register index (between 0 and 15)
         """
-        # TODO:  VBR = self.cpu.regs[m];
+        # VBR = self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def LDCMVBR(self, m: int):
@@ -1829,8 +1825,8 @@ class Emulator:
         (Rm) -> VBR, Rm+4 -> Rm
         :param m: register index (between 0 and 15)
         """
-        # TODO:  VBR = Read_32 (self.cpu.regs[m]);
-        # TODO:  self.cpu.regs[m] += 4;
+        # VBR = self.cpu.mem.read32 (self.cpu.regs[m])  # TODO: generated
+        # self.cpu.regs[m] += 4  # TODO: generated
         self.cpu.pc += 2
     
     def LDCSSR(self, m: int):
@@ -1838,7 +1834,7 @@ class Emulator:
         Rm -> SSR
         :param m: register index (between 0 and 15)
         """
-        # TODO:  SSR = self.cpu.regs[m],
+        # SSR = self.cpu.regs[m],  # TODO: generated
         self.cpu.pc += 2
     
     def LDCMSSR(self, m: int):
@@ -1846,8 +1842,8 @@ class Emulator:
         (Rm) -> SSR, Rm+4 -> Rm
         :param m: register index (between 0 and 15)
         """
-        # TODO:  SSR = Read_32 (self.cpu.regs[m]);
-        # TODO:  self.cpu.regs[m] += 4;
+        # SSR = self.cpu.mem.read32 (self.cpu.regs[m])  # TODO: generated
+        # self.cpu.regs[m] += 4  # TODO: generated
         self.cpu.pc += 2
     
     def LDCSPC(self, m: int):
@@ -1855,7 +1851,7 @@ class Emulator:
         Rm -> SPC
         :param m: register index (between 0 and 15)
         """
-        # TODO:  SPC = self.cpu.regs[m];
+        # Sself.cpu.pc = self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def LDCMSPC(self, m: int):
@@ -1863,8 +1859,8 @@ class Emulator:
         (Rm) -> SPC, Rm+4 -> Rm
         :param m: register index (between 0 and 15)
         """
-        # TODO:  SPC = Read_32 (self.cpu.regs[m]);
-        # TODO:  self.cpu.regs[m] += 4;
+        # Sself.cpu.pc = self.cpu.mem.read32 (self.cpu.regs[m])  # TODO: generated
+        # self.cpu.regs[m] += 4  # TODO: generated
         self.cpu.pc += 2
     
     def LDCDBR(self, m: int):
@@ -1872,7 +1868,7 @@ class Emulator:
         Rm -> DBR
         :param m: register index (between 0 and 15)
         """
-        # TODO:  DBR = self.cpu.regs[m];
+        # DBR = self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def LDCMDBR(self, m: int):
@@ -1880,8 +1876,8 @@ class Emulator:
         (Rm) -> DBR, Rm+4 -> Rm
         :param m: register index (between 0 and 15)
         """
-        # TODO:  DBR = Read_32 (self.cpu.regs[m]);
-        # TODO:  self.cpu.regs[m] += 4;
+        # DBR = self.cpu.mem.read32 (self.cpu.regs[m])  # TODO: generated
+        # self.cpu.regs[m] += 4  # TODO: generated
         self.cpu.pc += 2
     
     def LDCRn_BANK(self, m: int):
@@ -1889,7 +1885,7 @@ class Emulator:
         Rm -> Rn_BANK (n = 0-7)
         :param m: register index (between 0 and 15)
         """
-        # TODO:  Rn_BANK = self.cpu.regs[m];
+        # Rn_BANK = self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def LDCMRn_BANK(self, m: int):
@@ -1897,8 +1893,8 @@ class Emulator:
         (Rm) -> Rn_BANK, Rm+4 -> Rm
         :param m: register index (between 0 and 15)
         """
-        # TODO:  Rn_BANK = Read_32 (self.cpu.regs[m]);
-        # TODO:  self.cpu.regs[m] += 4;
+        # Rn_BANK = self.cpu.mem.read32 (self.cpu.regs[m])  # TODO: generated
+        # self.cpu.regs[m] += 4  # TODO: generated
         self.cpu.pc += 2
     
     def LDSMACH(self, m: int):
@@ -1906,7 +1902,7 @@ class Emulator:
         Rm -> MACH
         :param m: register index (between 0 and 15)
         """
-        # TODO:  MACH = self.cpu.regs[m];
+        # MACH = self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def LDSMMACH(self, m: int):
@@ -1914,8 +1910,8 @@ class Emulator:
         (Rm) -> MACH, Rm+4 -> Rm
         :param m: register index (between 0 and 15)
         """
-        # TODO:  MACH = Read_32 (self.cpu.regs[m]);
-        # TODO:  self.cpu.regs[m] += 4;
+        # MACH = self.cpu.mem.read32 (self.cpu.regs[m])  # TODO: generated
+        # self.cpu.regs[m] += 4  # TODO: generated
         self.cpu.pc += 2
     
     def LDSMACL(self, m: int):
@@ -1923,7 +1919,7 @@ class Emulator:
         Rm -> MACL
         :param m: register index (between 0 and 15)
         """
-        # TODO:  MACL = self.cpu.regs[m];
+        # MACL = self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def LDSMMACL(self, m: int):
@@ -1931,8 +1927,8 @@ class Emulator:
         (Rm) -> MACL, Rm+4 -> Rm
         :param m: register index (between 0 and 15)
         """
-        # TODO:  MACL = Read_32 (self.cpu.regs[m]);
-        # TODO:  self.cpu.regs[m] += 4;
+        # MACL = self.cpu.mem.read32 (self.cpu.regs[m])  # TODO: generated
+        # self.cpu.regs[m] += 4  # TODO: generated
         self.cpu.pc += 2
     
     def LDSPR(self, m: int):
@@ -1940,7 +1936,7 @@ class Emulator:
         Rm -> PR
         :param m: register index (between 0 and 15)
         """
-        # TODO:  PR = self.cpu.regs[m];
+        # PR = self.cpu.regs[m]  # TODO: generated
         self.cpu.pc += 2
     
     def LDSMPR(self, m: int):
@@ -1948,8 +1944,8 @@ class Emulator:
         (Rm) -> PR, Rm+4 -> Rm
         :param m: register index (between 0 and 15)
         """
-        # TODO:  PR = Read_32 (self.cpu.regs[m]);
-        # TODO:  self.cpu.regs[m] += 4;
+        # PR = self.cpu.mem.read32 (self.cpu.regs[m])  # TODO: generated
+        # self.cpu.regs[m] += 4  # TODO: generated
         self.cpu.pc += 2
     
     def LDTLB(self):
@@ -1963,9 +1959,9 @@ class Emulator:
         R0 -> (Rn) (without fetching cache block)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if (is_write_back_memory (self.cpu.regs[n]) && look_up_in_operand_cache (self.cpu.regs[n]) == MISS)
-        # TODO:  allocate_operand_cache_block (self.cpu.regs[n]);
-        # TODO:  Write_32 (self.cpu.regs[n], R[0]);
+        # if (is_write_back_memory (self.cpu.regs[n]) && look_up_in_operand_cache (self.cpu.regs[n]) == MISS):  # TODO
+        #     allocate_operand_cache_block (self.cpu.regs[n])  # TODO: generated
+        # self.cpu.mem.write32 (self.cpu.regs[n], self.cpu.regs[0])  # TODO: generated
         self.cpu.pc += 2
     
     def NOP(self):
@@ -1979,7 +1975,7 @@ class Emulator:
         Invalidate operand cache block
         :param n: register index (between 0 and 15)
         """
-        # TODO:  invalidate_operand_cache_block (self.cpu.regs[n]);
+        # invalidate_operand_cache_block (self.cpu.regs[n])  # TODO: generated
         self.cpu.pc += 2
     
     def OCBP(self, n: int):
@@ -1987,9 +1983,9 @@ class Emulator:
         Write back and invalidate operand cache block
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if (is_dirty_block (self.cpu.regs[n]))
-        # TODO:  write_back (self.cpu.regs[n])
-        # TODO:  invalidate_operand_cache_block (self.cpu.regs[n]);
+        # if (is_dirty_block (self.cpu.regs[n])):  # TODO
+        #     write_back (self.cpu.regs[n])  # TODO: generated
+        # invalidate_operand_cache_block (self.cpu.regs[n])  # TODO: generated
         self.cpu.pc += 2
     
     def OCBWB(self, n: int):
@@ -1997,8 +1993,8 @@ class Emulator:
         Write back operand cache block
         :param n: register index (between 0 and 15)
         """
-        # TODO:  if (is_dirty_block (self.cpu.regs[n]))
-        # TODO:  write_back (self.cpu.regs[n]);
+        # if (is_dirty_block (self.cpu.regs[n])):  # TODO
+        #     write_back (self.cpu.regs[n])  # TODO: generated
         self.cpu.pc += 2
     
     def PREF(self, n: int):
@@ -2006,38 +2002,38 @@ class Emulator:
         (Rn) -> operand cache
         :param n: register index (between 0 and 15)
         """
-        # TODO:  prefetch_operand_cache_block (self.cpu.regs[n]);
+        # prefetch_operand_cache_block (self.cpu.regs[n])  # TODO: generated
         self.cpu.pc += 2
     
     def RTE(self):
         """
         Delayed branch SH1*,SH2*: stack area -> PC/SR SH3*,SH4*: SSR/SPC -> SR/PC
         """
-        # TODO:  unsigned long temp = PC;
-        # TODO:  SR = SSR;
-        # TODO:  PC = SPC;
-        # TODO:  Delay_Slot (temp + 2);
+        # unsigned long temp = self.cpu.pc  # TODO: generated
+        # SR = SSR  # TODO: generated
+        # self.cpu.pc = Sself.cpu.pc  # TODO: generated
+        # self.cpu.delay_slot(temp + 2)  # TODO: generated
         pass  # TODO: Implement me !
     
     def SETS(self):
         """
         1 -> S
         """
-        # TODO:  S = 1;
+        # S = 1  # TODO: generated
         self.cpu.pc += 2
     
     def SETT(self):
         """
         1 -> T
         """
-        # TODO:  T = 1;
+        # T = 1  # TODO: generated
         self.cpu.pc += 2
     
     def SLEEP(self):
         """
         Sleep or standby
         """
-        # TODO:  Sleep_standby();
+        # Sleep_standby()  # TODO: generated
         pass  # TODO: Implement me !
     
     def STCSR(self, n: int):
@@ -2045,7 +2041,7 @@ class Emulator:
         SR -> Rn
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = SR;
+        # self.cpu.regs[n] = SR  # TODO: generated
         self.cpu.pc += 2
     
     def STCMSR(self, n: int):
@@ -2053,8 +2049,8 @@ class Emulator:
         Rn-4 -> Rn, SR -> (Rn)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] -= 4;
-        # TODO:  Write_32 (self.cpu.regs[n], SR);
+        # self.cpu.regs[n] -= 4  # TODO: generated
+        # self.cpu.mem.write32 (self.cpu.regs[n], SR)  # TODO: generated
         self.cpu.pc += 2
     
     def STCGBR(self, n: int):
@@ -2062,7 +2058,7 @@ class Emulator:
         GBR -> Rn
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = GBR;
+        # self.cpu.regs[n] = self.cpu.regs['gbr']  # TODO: generated
         self.cpu.pc += 2
     
     def STCMGBR(self, n: int):
@@ -2070,8 +2066,8 @@ class Emulator:
         Rn-4 -> Rn, GBR -> (Rn)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] -= 4;
-        # TODO:  Write_32 (self.cpu.regs[n], GBR);
+        # self.cpu.regs[n] -= 4  # TODO: generated
+        # self.cpu.mem.write32 (self.cpu.regs[n], self.cpu.regs['gbr'])  # TODO: generated
         self.cpu.pc += 2
     
     def STCVBR(self, n: int):
@@ -2079,7 +2075,7 @@ class Emulator:
         VBR -> Rn
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = VBR;
+        # self.cpu.regs[n] = VBR  # TODO: generated
         self.cpu.pc += 2
     
     def STCMVBR(self, n: int):
@@ -2087,8 +2083,8 @@ class Emulator:
         Rn-4 -> Rn, VBR -> (Rn)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] -= 4;
-        # TODO:  Write_32 (self.cpu.regs[n], VBR);
+        # self.cpu.regs[n] -= 4  # TODO: generated
+        # self.cpu.mem.write32 (self.cpu.regs[n], VBR)  # TODO: generated
         self.cpu.pc += 2
     
     def STCSGR(self, n: int):
@@ -2096,7 +2092,7 @@ class Emulator:
         SGR -> Rn
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = SGR;
+        # self.cpu.regs[n] = SGR  # TODO: generated
         self.cpu.pc += 2
     
     def STCMSGR(self, n: int):
@@ -2104,8 +2100,8 @@ class Emulator:
         Rn-4 -> Rn, SGR -> (Rn)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] -= 4;
-        # TODO:  Write_32 (self.cpu.regs[n], SGR);
+        # self.cpu.regs[n] -= 4  # TODO: generated
+        # self.cpu.mem.write32 (self.cpu.regs[n], SGR)  # TODO: generated
         self.cpu.pc += 2
     
     def STCSSR(self, n: int):
@@ -2113,7 +2109,7 @@ class Emulator:
         SSR -> Rn
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = SSR;
+        # self.cpu.regs[n] = SSR  # TODO: generated
         self.cpu.pc += 2
     
     def STCMSSR(self, n: int):
@@ -2121,8 +2117,8 @@ class Emulator:
         Rn-4 -> Rn, SSR -> (Rn)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] -= 4;
-        # TODO:  Write_32 (self.cpu.regs[n], SSR);
+        # self.cpu.regs[n] -= 4  # TODO: generated
+        # self.cpu.mem.write32 (self.cpu.regs[n], SSR)  # TODO: generated
         self.cpu.pc += 2
     
     def STCSPC(self, n: int):
@@ -2130,7 +2126,7 @@ class Emulator:
         SPC -> Rn
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = SPC;
+        # self.cpu.regs[n] = Sself.cpu.pc  # TODO: generated
         self.cpu.pc += 2
     
     def STCMSPC(self, n: int):
@@ -2138,8 +2134,8 @@ class Emulator:
         Rn-4 -> Rn, SPC -> (Rn)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] -= 4;
-        # TODO:  Write_32 (self.cpu.regs[n], SPC);
+        # self.cpu.regs[n] -= 4  # TODO: generated
+        # self.cpu.mem.write32 (self.cpu.regs[n], Sself.cpu.pc)  # TODO: generated
         self.cpu.pc += 2
     
     def STCDBR(self, n: int):
@@ -2147,7 +2143,7 @@ class Emulator:
         DBR -> Rn
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = DBR;
+        # self.cpu.regs[n] = DBR  # TODO: generated
         self.cpu.pc += 2
     
     def STCMDBR(self, n: int):
@@ -2155,8 +2151,8 @@ class Emulator:
         Rn-4 -> Rn, DBR -> (Rn)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] -= 4;
-        # TODO:  Write_32 (self.cpu.regs[n], DBR);
+        # self.cpu.regs[n] -= 4  # TODO: generated
+        # self.cpu.mem.write32 (self.cpu.regs[n], DBR)  # TODO: generated
         self.cpu.pc += 2
     
     def STCRm_BANK(self, n: int):
@@ -2164,7 +2160,7 @@ class Emulator:
         Rm_BANK -> Rn (m = 0-7)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = Rm_BANK;
+        # self.cpu.regs[n] = Rm_BANK  # TODO: generated
         self.cpu.pc += 2
     
     def STCMRm_BANK(self, n: int):
@@ -2172,8 +2168,8 @@ class Emulator:
         Rn-4 -> Rn, Rm_BANK -> (Rn) (m = 0-7)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] -= 4;
-        # TODO:  Write_32 (self.cpu.regs[n], Rm_BANK);
+        # self.cpu.regs[n] -= 4  # TODO: generated
+        # self.cpu.mem.write32 (self.cpu.regs[n], Rm_BANK)  # TODO: generated
         self.cpu.pc += 2
     
     def STSMACH(self, n: int):
@@ -2181,7 +2177,7 @@ class Emulator:
         MACH -> Rn
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = MACH;
+        # self.cpu.regs[n] = MACH  # TODO: generated
         self.cpu.pc += 2
     
     def STSMMACH(self, n: int):
@@ -2189,7 +2185,7 @@ class Emulator:
         Rn-4 -> Rn, MACH -> (Rn)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] -= 4;
+        # self.cpu.regs[n] -= 4  # TODO: generated
         self.cpu.pc += 2
     
     def STSMACL(self, n: int):
@@ -2197,7 +2193,7 @@ class Emulator:
         MACL -> Rn
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = MACL;
+        # self.cpu.regs[n] = MACL  # TODO: generated
         self.cpu.pc += 2
     
     def STSMMACL(self, n: int):
@@ -2205,8 +2201,8 @@ class Emulator:
         Rn-4 -> Rn, MACL -> (Rn)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] -= 4;
-        # TODO:  Write_32 (self.cpu.regs[n], MACL);
+        # self.cpu.regs[n] -= 4  # TODO: generated
+        # self.cpu.mem.write32 (self.cpu.regs[n], MACL)  # TODO: generated
         self.cpu.pc += 2
     
     def STSPR(self, n: int):
@@ -2214,7 +2210,7 @@ class Emulator:
         PR -> Rn
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] = PR;
+        # self.cpu.regs[n] = PR  # TODO: generated
         self.cpu.pc += 2
     
     def STSMPR(self, n: int):
@@ -2222,8 +2218,8 @@ class Emulator:
         Rn-4 -> Rn, PR -> (Rn)
         :param n: register index (between 0 and 15)
         """
-        # TODO:  self.cpu.regs[n] -= 4;
-        # TODO:  Write_32 (self.cpu.regs[n], PR);
+        # self.cpu.regs[n] -= 4  # TODO: generated
+        # self.cpu.mem.write32 (self.cpu.regs[n], PR)  # TODO: generated
         self.cpu.pc += 2
     
     def TRAPA(self, i: int):
@@ -2231,15 +2227,15 @@ class Emulator:
         SH1*,SH2*: PC/SR -> stack area, (imm*4 + VBR) -> PC SH3*,SH4*: PC/SR -> SPC/SSR, imm*4 -> TRA, 0x160 -> EXPEVT, VBR + 0x0100 -> PC
         :param i: value to add (up to 0xFF)
         """
-        # TODO:  int imm = (0x000000FF & i);
-        # TODO:  TRA = imm << 2;
-        # TODO:  SSR = SR;
-        # TODO:  SPC = PC + 2;
-        # TODO:  SGR = R15;
-        # TODO:  SR.MD = 1;
-        # TODO:  SR.BL = 1;
-        # TODO:  SR.RB = 1;
-        # TODO:  EXPEVT = 0x00000160;
-        # TODO:  PC = VBR + 0x00000100;
+        # int imm = (0x000000FF & i)  # TODO: generated
+        # TRA = imm << 2  # TODO: generated
+        # SSR = SR  # TODO: generated
+        # Sself.cpu.pc = self.cpu.pc + 2  # TODO: generated
+        # SGR = R15  # TODO: generated
+        # SR.MD = 1  # TODO: generated
+        # SR.BL = 1  # TODO: generated
+        # SR.RB = 1  # TODO: generated
+        # EXPEVT = 0x00000160  # TODO: generated
+        # self.cpu.pc = VBR + 0x00000100  # TODO: generated
         pass  # TODO: Implement me !
     

@@ -47,6 +47,8 @@ class RegisterWrapper(BaseWrapper):
             self.regEdit.state(["!invalid"])
 
         if value != self._value_cache:
+            if type(value) == bytearray:
+                value = int.from_bytes(value, "big")
             self._value_display = f'{hex(value)}'
             self._value_cache = value
             self.regEdit.delete(0, tk.END)
@@ -194,7 +196,7 @@ class RegisterFrame(BaseFrame):
         refresh.pack(fill=tk.Y, expand=0, anchor=tk.SE)
 
         def reload_regs():
-            self.do_refresh()
+            self._refresh_callback()
 
         refresh["command"] = reload_regs
 

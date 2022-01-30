@@ -3,7 +3,7 @@ from ruk.jcore.memory import Memory, MemoryMap
 
 
 class Classpad:
-    def __init__(self, rom: bytes, debug: bool = False):
+    def __init__(self, rom: bytes, debug: bool = False, start_pc=None):
         """
         Create a virtual Classpad II
         :param rom: rom bytes, raw assembly !
@@ -11,7 +11,8 @@ class Classpad:
         """
         # TODO: get real values !!
         self._ram = Memory(0x100_0000)
-        self._rom = Memory(0x150_0000)
+        self._rom = Memory(0x1FF_FFFF)
+        self._cached_rom = Memory(0x1FF_FFFF)
         # Debug turn on stacktrace
         self.debug = debug
 
@@ -20,14 +21,25 @@ class Classpad:
         self.load_rom(rom)
         self.setup_memory()
 
-        self._cpu = CPU(self._memory, start_pc=0x8000_0000, debug=debug)
+        if start_pc is None:
+            start_pc = 0x8000_0000
+
+        self._cpu = CPU(self._memory, start_pc=start_pc, debug=debug)
 
     def load_rom(self, rom: bytes):
         self._rom.write_bin(0, rom)
+        self._cached_rom.write_bin(0, rom)
 
     def setup_memory(self):
         self._memory.add(0x8C00_0000, self._ram)
         self._memory.add(0x8000_0000, self._rom)
+        self._memory.add(0xA000_0000, self._cached_rom)
+
+        self.setup_direct_io()
+
+    def setup_direct_io(self):
+        pass
+        # 0xFEC0_0000 -> 0xFEFF_FFFF
 
     @property
     def cpu(self):
@@ -42,4 +54,10 @@ class Classpad:
                 self._cpu.stacktrace()
                 if self.debug:
                     raise
+
+    def add_rom(self, rom: bytes, index: int):
+        rom_memory = Memory(len(rom))
+        rom_memory.write_bin(0, rom)
+        self._memory.add(index, rom_memory)
+
 

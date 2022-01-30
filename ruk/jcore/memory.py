@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Union
 
 
 class Memory:
@@ -63,12 +63,15 @@ class MemoryMap:
     def add(self, addr_start: int, memory: Memory):
         self._mem[addr_start] = memory
 
-    def resolve(self, address: int) -> Tuple[Memory, int]:
+    def resolve(self, address: Union[int, bytearray]) -> Tuple[Memory, int]:
         """
         Browse the memory map for the address.
         :param address:
         :return: Memory
         """
+        if type(address) == bytearray:
+            address = int.from_bytes(address, "big")
+
         for start in self._mem:
             mem = self._mem[start]
             if start <= address <= start + len(mem):
@@ -96,16 +99,31 @@ class MemoryMap:
             return mem.read16(address - start)
         raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover
 
-    def get_arround(self, address: int, size: int):
+    def read8(self, address: int):
+        # try:
+        mem, start = self.resolve(address)
+        # except IndexError:
+        #     raise IndexError
+        # Can read 1bytes ?
+        if address <= start + len(mem):
+            return bytes((mem.read8(address - start),))
+        raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover
+
+    def get_arround(self, address: Union[int, bytearray], size: int):
         """
         Get memory around address
         :param address: Memory address to seek at
         :param size: relative size to get bytes, eg 5 will get 5 bytes before address and 5 bytes after.
         """
+        if type(address) == bytearray:
+            address = int.from_bytes(address, "big")
+
         mem, start = self.resolve(address)
 
-        start_p = address - size
-        end_p = address + size
+        # start_p = address - size
+        # end_p = address + size
+        start_p = address
+        end_p = address + size*2
 
         if end_p <= start or start_p >= start + len(mem):
             raise IndexError(f'Reading out of memory bounds : {hex(address)} +- {size}')
@@ -128,24 +146,35 @@ class MemoryMap:
         raise IndexError(f"Edge case not handled : {start_p} {end_p}")
         # return start_p, end_p, b'\x0f'*(size*2)
 
-    def _write16(self, address: int, bytes_data: bytes):
+    def write32(self, address: int, bytes_data: bytes):
         """
         Potentially dangerous function that write anywhere in memory.
         Used for the "Edit" functions of the GUI
         """
         mem, start = self.resolve(address)
         # Can write 4bytes ?
+        if address + 3 <= start + len(mem):
+            return mem.write_bin(address - start, bytes_data)
+        raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover
+
+    def write16(self, address: int, bytes_data: bytes):
+        """
+        Potentially dangerous function that write anywhere in memory.
+        Used for the "Edit" functions of the GUI
+        """
+        mem, start = self.resolve(address)
+        # Can write 2bytes ?
         if address + 1 <= start + len(mem):
             return mem.write_bin(address - start, bytes_data)
         raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover
 
-    def _write8(self, address: int, bytes_data: bytes):
+    def write8(self, address: int, bytes_data: bytes):
         """
         Potentially dangerous function that write anywhere in memory.
         Used for the "Edit" functions of the GUI
         """
         mem, start = self.resolve(address)
-        # Can write 4bytes ?
+        # Can write 1bytes ?
         if address <= start + len(mem):
             return mem.write_bin(address - start, bytes_data)
         raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover

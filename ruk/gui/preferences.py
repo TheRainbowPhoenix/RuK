@@ -95,6 +95,10 @@ class ColorTheme(DictWrapper):
         return self._values["ec jmp"]
 
     @property
+    def nop(self):
+        return self._values["ec nop"]
+
+    @property
     def ret(self):
         return self._values["ec ret"]
 
@@ -121,6 +125,10 @@ class ColorTheme(DictWrapper):
     @property
     def flow(self):
         return self._values["ec flow"]
+
+    @property
+    def other(self):
+        return self._values["ec other"]
 
     @property
     def call(self):
