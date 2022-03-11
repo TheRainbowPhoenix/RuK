@@ -5,7 +5,7 @@ from typing import Union
 if typing.TYPE_CHECKING:  # pragma: no cover
     from ruk.jcore.cpu import CPU
 
-from ctypes import c_long, c_uint32
+from ctypes import c_long, c_uint32, c_ulong
 
 
 def _i(val: Union[int, bytearray, bytes]) -> int:
@@ -15,6 +15,15 @@ def _i(val: Union[int, bytearray, bytes]) -> int:
     if type(val) in [bytearray, bytes]:
         return int.from_bytes(val, "big")  # , signed=True
     return c_long(val).value
+
+
+def _u(val: Union[int, bytearray, bytes]) -> int:
+    """
+    Safe type conversion, unsigned
+    """
+    if type(val) in [bytearray, bytes]:
+        return int.from_bytes(val, "big", signed=False)  # , signed=True
+    return c_ulong(val).value
 
 
 class Emulator:
@@ -68,7 +77,17 @@ class Emulator:
             64: self.XTRCT,
             79: self.ADD,
             80: self.ADDI,
+            81: self.ADDC,
+            82: self.ADDV,
+            83: self.CMPIM,
+            84: self.CMPEQ,
+            85: self.CMPHI,
+            86: self.CMPGE,
+            87: self.CMPHI,
             88: self.CMPGT,
+            89: self.CMPPL,
+            90: self.CMPPZ,
+            91: self.CMPSTR,
             103: self.DT,
             104: self.EXTSB,
             105: self.EXTSW,
@@ -298,7 +317,7 @@ class Emulator:
         """
         disp = (0x0000000F & d)  # (long)d  # TODO: generated
         self.cpu.regs[0] = _i(self.cpu.mem.read8(self.cpu.regs[m] + disp))  # TODO: generated
-        if ((R[0] & 0x80) == 0):  # TODO
+        if ((self.cpu.regs[0] & 0x80) == 0):  # TODO
             self.cpu.regs[0] &= 0x000000FF  # TODO: generated
         else:  # TODO
             self.cpu.regs[0] = _i(0xFFFFFF00 | self.cpu.regs[0])  # TODO: generated
@@ -312,7 +331,7 @@ class Emulator:
         """
         disp = (0x0000000F & d)  # (long)d  # TODO: generated
         self.cpu.regs[0] = _i(self.cpu.mem.read16(self.cpu.regs[m] + (disp << 1)))  # TODO: generated
-        if ((R[0] & 0x8000) == 0):  # TODO
+        if (self.cpu.regs[0] & 0x8000) == 0:  # TODO
             self.cpu.regs[0] &= 0x0000FFFF  # TODO: generated
         else:  # TODO
             self.cpu.regs[0] = _i(0xFFFF0000 | self.cpu.regs[0])  # TODO: generated
@@ -553,6 +572,97 @@ class Emulator:
 
         self.cpu.pc += 2
 
+    def ADDC(self, m: int, n: int):
+        """
+        Rn + Rm + T -> Rn, carry -> T
+        :param m: register index (between 0 and 15)
+        :param n: register index (between 0 and 15)
+        """
+        tmp1 = _u(self.cpu.regs[n] + self.cpu.regs[m])  # TODO: generated
+        tmp0 = _u(self.cpu.regs[n])  # TODO: generated
+        self.cpu.regs[n] = _u(tmp1 + self.cpu.regs['sr'])  # TODO: generated
+        if tmp0 > tmp1:  # TODO
+            self.cpu.regs['sr'] = 1  # TODO: generated
+        else:  # TODO
+            self.cpu.regs['sr'] = 0  # TODO: generated
+        if tmp1 > _u(self.cpu.regs[n]):  # TODO
+            self.cpu.regs['sr'] = 1  # TODO: generated
+        self.cpu.pc += 2
+
+    def ADDV(self, m: int, n: int):
+        """
+        Rn + Rm -> Rn, overflow -> T
+        :param m: register index (between 0 and 15)
+        :param n: register index (between 0 and 15)
+        """
+        # long dest, src, ans  # TODO: generated
+        dest = 0 if _i(self.cpu.regs[n]) >= 0 else 1
+        src = 0 if _i(self.cpu.regs[m]) >= 0 else 1
+
+        src += dest  # TODO: generated
+        self.cpu.regs[n] += self.cpu.regs[m]  # TODO: generated
+        ans = 0 if _i(self.cpu.regs[n]) >= 0 else 1  # TODO
+        ans += dest  # TODO: generated
+        if src == 0 or src == 2:  # TODO
+            if ans == 1:  # TODO
+                self.cpu.regs['sr'] = 1  # TODO: generated
+            else:  # TODO
+                self.cpu.regs['sr'] = 0  # TODO: generated
+        else:  # TODO
+            self.cpu.regs['sr'] = 0  # TODO: generated
+        self.cpu.pc += 2
+
+    def CMPIM(self, i: int):
+        """
+        If R0 = (sign extension)imm: 1 -> T Else: 0 -> T
+        :param i: value to add (up to 0xFF)
+        """
+        if (i & 0x80) == 0:  # TODO
+            imm = _i(0x000000FF & i)  # TODO: generated
+        else:  # TODO
+            imm = _i(0xFFFFFF00 | i)  # TODO: generated
+        if self.cpu.regs[0] == imm:  # TODO
+            self.cpu.regs['sr'] = 1  # TODO: generated
+        else:  # TODO
+            self.cpu.regs['sr'] = 0  # TODO: generated
+        self.cpu.pc += 2
+
+    def CMPEQ(self, m: int, n: int):
+        """
+        If Rn = Rm: 1 -> T Else: 0 -> T
+        :param m: register index (between 0 and 15)
+        :param n: register index (between 0 and 15)
+        """
+        if self.cpu.regs[n] == self.cpu.regs[m]:  # TODO
+            self.cpu.regs['sr'] = 1  # TODO: generated
+        else:  # TODO
+            self.cpu.regs['sr'] = 0  # TODO: generated
+        self.cpu.pc += 2
+
+    def CMPHI(self, m: int, n: int):
+        """
+        If Rn > Rm (unsigned): 1 -> T Else: 0 -> T
+        :param m: register index (between 0 and 15)
+        :param n: register index (between 0 and 15)
+        """
+        if _u(self.cpu.regs[n]) > _u(self.cpu.regs[m]):  # TODO
+            self.cpu.regs['sr'] = 1  # TODO: generated
+        else:  # TODO
+            self.cpu.regs['sr'] = 0  # TODO: generated
+        self.cpu.pc += 2
+
+    def CMPGE(self, m: int, n: int):
+        """
+        If Rn >= Rm (signed): 1 -> T Else: 0 -> T
+        :param m: register index (between 0 and 15)
+        :param n: register index (between 0 and 15)
+        """
+        if _i(self.cpu.regs[n]) >= _i(self.cpu.regs[m]):
+            self.cpu.regs['sr'] = 1  # TODO: generated
+        else:  # TODO
+            self.cpu.regs['sr'] = 0  # TODO: generated
+        self.cpu.pc += 2
+
     def CMPGT(self, m: int, n: int):
         """
         1 -> T If Rn > Rm (signed) Else 0 -> 1
@@ -560,6 +670,48 @@ class Emulator:
         :param n: register index (between 0 and 15)
         """
         self.cpu.regs['sr'] = 1 if _i(self.cpu.regs[n]) > _i(self.cpu.regs[m]) else 0
+        self.cpu.pc += 2
+
+    def CMPPL(self, n: int):
+        """
+        If Rn > 0 (signed): 1 -> T Else: 0 -> T
+        :param n: register index (between 0 and 15)
+        """
+        if _i(self.cpu.regs[n]) > 0:
+            self.cpu.regs['sr'] = 1
+        else:
+            self.cpu.regs['sr'] = 0
+        self.cpu.pc += 2
+
+    def CMPPZ(self, n: int):
+        """
+        If Rn >= 0 (signed): 1 -> T Else: 0 -> T
+        :param n: register index (between 0 and 15)
+        """
+        if _i(self.cpu.regs[n]) >= 0:
+            self.cpu.regs['sr'] = 1
+        else:
+            self.cpu.regs['sr'] = 0
+        self.cpu.pc += 2
+
+    def CMPSTR(self, m: int, n: int):
+        """
+        If Rn and Rm have an equal byte: 1 -> T Else: 0 -> T
+        :param m: register index (between 0 and 15)
+        :param n: register index (between 0 and 15)
+        """
+        # unsigned long temp  # TODO: generated
+        # long HH, HL, LH, LL  # TODO: generated
+        # temp = self.cpu.regs[n] ^ self.cpu.regs[m]  # TODO: generated
+        # HH = (temp & 0xFF000000) >> 24  # TODO: generated
+        # HL = (temp & 0x00FF0000) >> 16  # TODO: generated
+        # LH = (temp & 0x0000FF00) >> 8  # TODO: generated
+        # LL = temp & 0x000000FF  # TODO: generated
+        # HH = HH && HL && LH && LL  # TODO: generated
+        # if (HH == 0):  # TODO
+        #     T = 1  # TODO: generated
+        # else:  # TODO
+        #     T = 0  # TODO: generated
         self.cpu.pc += 2
 
     def DT(self, n: int):
@@ -660,11 +812,11 @@ class Emulator:
         :param d: disp
         """
         # int disp  # TODO: generated
-        if ((d & 0x80) == 0):  # TODO
-            disp = (0x000000FF & d)  # TODO: generated
+        if (d & 0x80) == 0:  # TODO
+            disp = 0x000000FF & d
         else:  # TODO
-            disp = c_long(0xFFFFFF00 | d).value  # (long)i
-        if self.cpu.regs['sr'] == 0:  # TODO
+            disp = _i(0xFFFFFF00 | d)  # (long)i
+        if self.cpu.regs['sr'] == 1:  # TODO
             self.cpu.pc = self.cpu.pc + 4 + (disp << 1)  # TODO: generated
         else:  # TODO
             self.cpu.pc += 2

@@ -49,7 +49,7 @@ class RegisterWrapper(BaseWrapper):
         if value != self._value_cache:
             if type(value) == bytearray:
                 value = int.from_bytes(value, "big")
-            self._value_display = f'{hex(value)}'
+            self._value_display = f'{hex(0xFFFFFFFF & value)}'
             self._value_cache = value
             self.regEdit.delete(0, tk.END)
             self.regEdit.insert(0, self._value_display)
