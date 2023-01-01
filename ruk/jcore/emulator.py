@@ -17,6 +17,10 @@ def _i(val: Union[int, bytearray, bytes]) -> int:
     return c_long(val).value
 
 
+def _b(val: int, size: int = 4) -> bytes:
+    return val.to_bytes(size, 'big')
+
+
 def _u(val: Union[int, bytearray, bytes]) -> int:
     """
     Safe type conversion, unsigned
@@ -93,6 +97,11 @@ class Emulator:
             105: self.EXTSW,
             106: self.EXTUB,
             107: self.EXTUW,
+            116: self.SUB,
+            141: self.SHLL,
+            142: self.SHLL2,
+            143: self.SHLL8,
+            144: self.SHLL16,
             149: self.BF,
             150: self.BFS,
             151: self.BT,
@@ -105,6 +114,8 @@ class Emulator:
             158: self.JSR,
             161: self.RTS,
             214: self.NOP,
+            256: self.STSMPR,
+            270: self.TRAPA,
         }
 
     def resolve(self, opcode_id: int) -> typing.Callable:
@@ -235,7 +246,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        self.cpu.mem.write32(self.cpu.regs[n], self.cpu.regs[m])  # TODO: generated
+        self.cpu.mem.write32(self.cpu.regs[n], _b(self.cpu.regs[m]))  # TODO: generated
         self.cpu.pc += 2
 
     def MOVBP(self, m: int, n: int):
@@ -305,7 +316,7 @@ class Emulator:
         :param m: register index (between 0 and 15)
         :param n: register index (between 0 and 15)
         """
-        self.cpu.mem.write32(self.cpu.regs[n] - 4, self.cpu.regs[m])  # TODO: generated
+        self.cpu.mem.write32(self.cpu.regs[n] - 4, _b(self.cpu.regs[m]))  # TODO: generated
         self.cpu.regs[n] -= 4  # TODO: generated
         self.cpu.pc += 2
 
@@ -772,6 +783,51 @@ class Emulator:
         self.cpu.regs[n] &= 0x0000FFFF  # TODO: generated
         self.cpu.pc += 2
 
+    def SUB(self, m: int, n: int):
+        """
+        Rn - Rm -> Rn
+        :param m: register index (between 0 and 15)
+        :param n: register index (between 0 and 15)
+        """
+        self.cpu.regs[n] -= self.cpu.regs[m]  # TODO: generated
+        self.cpu.pc += 2
+
+    def SHLL(self, n: int):
+        """
+        T << Rn << 0
+        :param n: register index (between 0 and 15)
+        """
+        if (self.cpu.regs[n] & 0x80000000) == 0:
+            T = 0  # TODO: generated
+        else:  # TODO
+            T = 1  # TODO: generated
+        self.cpu.regs[n] <<= 1  # TODO: generated
+        self.cpu.pc += 2
+
+    def SHLL2(self, n: int):
+        """
+        Rn << 2 -> Rn
+        :param n: register index (between 0 and 15)
+        """
+        self.cpu.regs[n] <<= 2
+        self.cpu.pc += 2
+
+    def SHLL8(self, n: int):
+        """
+        Rn << 8 -> Rn
+        :param n: register index (between 0 and 15)
+        """
+        self.cpu.regs[n] <<= 8
+        self.cpu.pc += 2
+
+    def SHLL16(self, n: int):
+        """
+        Rn << 16 -> Rn
+        :param n: register index (between 0 and 15)
+        """
+        self.cpu.regs[n] <<= 16
+        self.cpu.pc += 2
+
     def BF(self, d: int):
         """
         disp*2 + PC + 4 -> PC If T = 0 Else nop
@@ -923,3 +979,30 @@ class Emulator:
         No operation
         """
         self.cpu.pc += 2
+
+    def STSMPR(self, n: int):
+        """
+        Rn-4 -> Rn, PR -> (Rn)
+        :param n: register index (between 0 and 15)
+        """
+        self.cpu.regs[n] -= 4
+        self.cpu.mem.write32(self.cpu.regs[n], _b(self.cpu.regs['pr']))  # TODO: generated
+        self.cpu.pc += 2
+
+    def TRAPA(self, i: int):
+        """
+        SH1*,SH2*: PC/SR -> stack area, (imm*4 + VBR) -> PC SH3*,SH4*: PC/SR -> SPC/SSR, imm*4 -> TRA, 0x160 -> EXPEVT, VBR + 0x0100 -> PC
+        :param i: value to add (up to 0xFF)
+        """
+        # int imm = (0x000000FF & i)  # TODO: generated
+        # TRA = imm << 2  # TODO: generated
+        # SSR = SR  # TODO: generated
+        # Sself.cpu.pc = self.cpu.pc + 2  # TODO: generated
+        # SGR = R15  # TODO: generated
+        # SR.MD = 1  # TODO: generated
+        # SR.BL = 1  # TODO: generated
+        # SR.RB = 1  # TODO: generated
+        # EXPEVT = 0x00000160  # TODO: generated
+        # self.cpu.pc = VBR + 0x00000100  # TODO: generated
+        raise NotImplementedError()
+        pass  # TODO: Implement me !

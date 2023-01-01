@@ -3,16 +3,16 @@ from ruk.jcore.memory import Memory, MemoryMap
 
 
 class Classpad:
-    def __init__(self, rom: bytes, debug: bool = False, start_pc=None):
+    def __init__(self, rom: bytes, debug: bool = False, start_pc=None, ram_size: int = 0x100_0000):
         """
         Create a virtual Classpad II
         :param rom: rom bytes, raw assembly !
         :param debug: Flag to enable exception and stacktrace printing
         """
         # TODO: get real values !!
-        self._ram = Memory(0x100_0000)
-        self._rom = Memory(0x1FF_FFFF)
-        self._cached_rom = Memory(0x1FF_FFFF)
+        self._ram = Memory(ram_size)
+        self._rom = Memory(len(rom))  # 0x1FF_FFFF)
+        self._cached_rom = Memory(len(rom))  # 0x1FF_FFFF)
         # Debug turn on stacktrace
         self.debug = debug
 
@@ -44,6 +44,10 @@ class Classpad:
     @property
     def cpu(self):
         return self._cpu
+
+    @property
+    def ram(self):
+        return self._ram
 
     def run(self):
         while not self._cpu.ebreak:

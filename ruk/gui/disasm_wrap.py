@@ -290,7 +290,7 @@ class DisasmFrame(BaseFrame):
     def _setup_ux(self, root):
         self.canvas.bind("<Button-1>", self.do_click)
         self.canvas.bind("<Button-3>", self.do_context_menu)
-        root.bind_all("<Control-c>", lambda x: self.do_copy_instructions())
+        # root.bind_all("<Control-c>", lambda x: self.do_copy_instructions())
         root.bind_all("<Control-Shift-c>", lambda x: self.do_copy_address())
         root.bind_all("<Control-Shift-C>", lambda x: self.do_copy_address())
         root.bind_all("<Home>", lambda x: self.do_back_top())
