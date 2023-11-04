@@ -19,6 +19,9 @@ if __name__ == '__main__':
     # Reading raw bytes
     # with open("elfs/rom_01.bin", 'rb') as f:
     #     rom = f.read()
+    # with open("elfs/app_template_printf.bin", 'rb') as f:
+    #     rom = f.read()
+    #     start_pc = 0x8cff0000
 
     """
     0xA0000000 to 0xA1FFFFFF - Cached
@@ -35,8 +38,9 @@ if __name__ == '__main__':
     # with open("scratches/all_opcodes.bin", 'rb') as f:
     #     rom = f.read()
 
-    cp = Classpad(rom, debug=True, start_pc=start_pc)
+    cp = Classpad(rom, debug=True, start_pc=start_pc, ram_size=0x0f_0000)
     # cp.add_rom(bootrom, 0)
+    # cp.add_rom(rom, start_pc)
     dbg_win = DebuggerWindow()
     dbg_win.attach(cp)
     dbg_win.show()

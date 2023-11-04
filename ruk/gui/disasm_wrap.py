@@ -458,7 +458,11 @@ class DisasmFrame(BaseFrame):
             try:
                 op_str, args = self.disasm.disasm(val, trace_only=True)
 
-                op_mod = op_str.format(**args)  # op_str % args
+                mod_args = {**args}
+                if "d" in mod_args:
+                    mod_args["d"] *= 4
+
+                op_mod = op_str.format(**mod_args)  # op_str % args
                 ops = op_mod.split(" ")
                 op_str = ops[0]
 

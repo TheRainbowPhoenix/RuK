@@ -111,8 +111,10 @@ class RegisterWrapper(BaseWrapper):
 
 
 class RegisterFrame(BaseFrame):
-    def __init__(self, cpu: CPU, **kw):
+    def __init__(self, cpu: CPU, root: tk.Tk, **kw):
         super().__init__()
+        self._root = root
+        self._cpu = cpu
         self._regs = cpu.regs
         self._pc = cpu.reg_pc
         self.regs_wrapper: Dict[str, RegisterWrapper] = {}
@@ -186,19 +188,43 @@ class RegisterFrame(BaseFrame):
         Just some test buttons.
         """
         widget = tk.Frame(root, bd=12)
-        widget.pack(fill='both', expand=1, anchor=tk.SE)
+        widget.pack(fill='both', expand=1, anchor=tk.SE, padx=20)
         refresh = ttk.Button(widget,
                              text="Refresh",
                              style="Accent.TButton",
-                             width=28,
+                             width=24,
                              )
 
-        refresh.pack(fill=tk.Y, expand=0, anchor=tk.SE)
+        memory_map = ttk.Button(widget,
+                             text="Memory Map",
+                             style="Secondary.TButton",
+                             width=24,
+                             )
+
+        memory_map.grid(row=0, column=0, padx=5, pady=5, sticky=tk.SE)
+        refresh.grid(row=0, column=1, padx=5, pady=5, sticky=tk.SE)
+
+        # refresh.pack(fill=tk.Y, expand=0, anchor=tk.SE)
+        # memory_map.pack(fill=tk.Y, expand=0, anchor=tk.SW)
 
         def reload_regs():
             self._refresh_callback()
 
+        def show_memory_map():
+            self._show_memory_map()
+
         refresh["command"] = reload_regs
+        memory_map["command"] = show_memory_map
+
+    def _show_memory_map(self):
+        from ruk.gui.memory_map import MemoryMapWindow
+        try:
+            root = self._root
+        except:
+            root = None
+
+        edit_dialog = MemoryMapWindow(root, self._cpu)
+        edit_dialog.show()
 
     def do_refresh(self):
         for reg_name in self.regs_wrapper:

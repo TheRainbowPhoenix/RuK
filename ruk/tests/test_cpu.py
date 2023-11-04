@@ -18,8 +18,8 @@ class TestCPU(TestCase):
         self.rom.write_bin(0, raw_asm)
 
         memory = MemoryMap()
-        memory.add(0x8C00, self.ram)
-        memory.add(0x8000, self.rom)
+        memory.add(0x8C00, self.ram, name="RAM")
+        memory.add(0x8000, self.rom, name="ROM")
 
         self.start_pc = 0x8000
 
@@ -126,7 +126,7 @@ class TestCPU(TestCase):
 
         # Checking the delay slot
         self.assertEqual(self.cpu.regs[0], 0x3)
-        mock_print.assert_called_with('mov R4,R0')
+        mock_print.assert_called_with('mov r4, r0')
 
     def test_reset(self):
         self.cpu.pc = 0xdeadbeef

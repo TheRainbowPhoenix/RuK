@@ -9,7 +9,7 @@ class TestMemory(TestCase):
         self.mem._mem[0x70:0x7F] = b'\xFF' * 0xF
 
         self.memmap = MemoryMap()
-        self.memmap.add(0x800, self.mem)
+        self.memmap.add(0x800, self.mem, name="MEM")
 
     def test_read8(self):
         self.assertEqual(self.mem.read8(0x0), 0)

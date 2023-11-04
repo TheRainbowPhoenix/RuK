@@ -39,8 +39,8 @@ if __name__ == '__main__':
     cp.cpu.regs[2] = 0x80020070  # syscall_table
     cp.cpu.regs[0] = 0x2  # syscall_id
 
-    cp.add_rom(rom, 0x8002_0070)
-    cp.add_rom(trapa, 0x8068_7CD0)
+    cp.add_rom(rom, 0x8002_0070, name="User ROM")
+    cp.add_rom(trapa, 0x8068_7CD0, name="TrapA")
 
     dbg_win = DebuggerWindow()
     dbg_win.attach(cp)

@@ -56,12 +56,45 @@ class Memory:
         return self._mem[start:end]
 
 
+class MemoryPermission:
+    READ_PERMISSION = 1
+    WRITE_PERMISSION = 2
+    EXECUTE_PERMISSION = 4
+
+    @staticmethod
+    def from_string(permissions_str: str) -> int:
+        permissions = 0
+        if 'R' in permissions_str:
+            permissions |= MemoryPermission.READ_PERMISSION
+        if 'W' in permissions_str:
+            permissions |= MemoryPermission.WRITE_PERMISSION
+        if 'X' in permissions_str:
+            permissions |= MemoryPermission.EXECUTE_PERMISSION
+        return permissions
+
+    @staticmethod
+    def to_string(permissions: int) -> str:
+        permission_str = ""
+        if permissions & MemoryPermission.READ_PERMISSION:
+            permission_str += 'R'
+        if permissions & MemoryPermission.WRITE_PERMISSION:
+            permission_str += 'W'
+        if permissions & MemoryPermission.EXECUTE_PERMISSION:
+            permission_str += 'X'
+        return permission_str
+
+
 class MemoryMap:
     def __init__(self):
         self._mem = {}
+        self._metas = {}
 
-    def add(self, addr_start: int, memory: Memory):
+    def add(self, addr_start: int, memory: Memory, name: str = "-", perms: str = None):
         self._mem[addr_start] = memory
+        self._metas[addr_start] = {
+            "perms": MemoryPermission.from_string(perms or "RWX"),
+            "name": name
+        }
 
     def resolve(self, address: Union[int, bytearray]) -> Tuple[Memory, int]:
         """
@@ -178,3 +211,15 @@ class MemoryMap:
         if address <= start + len(mem):
             return mem.write_bin(address - start, bytes_data)
         raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover
+
+    def get_mapped_areas(self):
+        mapped_areas = []
+        for start, memory in self._mem.items():
+            if start in self._metas:
+                perms, name = self._metas[start].values()
+                perms = MemoryPermission.to_string(perms)
+            else:
+                perms, name = ("RWX", "???")
+            end = start + len(memory)
+            mapped_areas.append((start, end, name, perms))  # TODO: name + perms !
+        return mapped_areas

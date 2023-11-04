@@ -22,9 +22,9 @@ PLATFORM = sys.platform
 class BaseWindow(object):
     def __init__(self, title: str = "Unnamed window", root=None):
         if root is None:
-            self.root = tk.Tk()
+            self.root: tk.Tk = tk.Tk()
         else:
-            self.root = root
+            self.root: tk.Tk = root
 
         if "win" in PLATFORM:
             app_id = u'local.konshin.phoebe.RuK'
@@ -41,6 +41,9 @@ class BaseWindow(object):
 
         if root is None:
             self.set_theme()
+
+    def get_root(self) -> tk.Tk:
+        return self.root
 
     def win32_fixes(self):
         if "win" in PLATFORM:
@@ -105,13 +108,15 @@ class ModalWindow(BaseWindow):
 
 class DebuggerWindow(BaseWindow):
     def __init__(self, **kw):
-        super().__init__(title="RuK - Debugger")
+        super().__init__(title="Debugger :: RuK")
 
         self.frames: typing.List[BaseFrame] = []
 
         self._cp: Classpad = None
 
     def setup_workspace(self):
+        root = self.get_root()
+
         """
         Control frames: debugger
         """
@@ -137,7 +142,7 @@ class DebuggerWindow(BaseWindow):
         """
         regs_frame = tk.Frame(master=self.root, width=200, height=100)
 
-        self.reg_ctrl_frame: RegisterFrame = RegisterFrame(self._cp.cpu)
+        self.reg_ctrl_frame: RegisterFrame = RegisterFrame(self._cp.cpu, root)
         self.reg_ctrl_frame.hook(regs_frame)
         self.reg_ctrl_frame.set_refresh_callback(self.refresh_all)
         self.frames.append(self.reg_ctrl_frame)

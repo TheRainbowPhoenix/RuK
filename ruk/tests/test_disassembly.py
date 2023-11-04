@@ -17,4 +17,4 @@ class TestDisassembler(TestCase):
 
     def test_disasm_trace_only(self):
         self.disasm = Disassembler(debug=False)
-        self.assertEqual(("add #h'{i:04x},R{n:d}", {'i': 127, 'n': 1}), self.disasm.disasm(0x717f, trace_only=True))
+        self.assertEqual(("add #h'{i:04x}, r{n:d}", {'i': 127, 'n': 1}), self.disasm.disasm(0x717f, trace_only=True))

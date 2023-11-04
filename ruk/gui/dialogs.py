@@ -256,5 +256,5 @@ if __name__ == '__main__':
     mbox('starting in 1 second...', t=1)
     user['name'] = mbox('name?', entry=True)
     if user['name']:
-        user['sex'] = mbox('male or female?', ('male', 'm'), ('female', 'f'))
+        user['binary'] = mbox('0 or 1?', ('False', '0'), ('True', '1'))
         mbox(user, frame=False)

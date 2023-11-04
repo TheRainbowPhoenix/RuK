@@ -31,9 +31,9 @@ class Classpad:
         self._cached_rom.write_bin(0, rom)
 
     def setup_memory(self):
-        self._memory.add(0x8C00_0000, self._ram)
-        self._memory.add(0x8000_0000, self._rom)
-        self._memory.add(0xA000_0000, self._cached_rom)
+        self._memory.add(0x8C00_0000, self._ram, name="RAM", perms="RWX")
+        self._memory.add(0x8000_0000, self._rom, name="ROM", perms="RX")
+        self._memory.add(0xA000_0000, self._cached_rom, name="Cached ROM", perms="RX")
 
         self.setup_direct_io()
 
@@ -59,9 +59,9 @@ class Classpad:
                 if self.debug:
                     raise
 
-    def add_rom(self, rom: bytes, index: int):
+    def add_rom(self, rom: bytes, index: int, name: str = "UserRom", perms: str = None):
         rom_memory = Memory(len(rom))
         rom_memory.write_bin(0, rom)
-        self._memory.add(index, rom_memory)
+        self._memory.add(index, rom_memory, name, perms)
 
 
