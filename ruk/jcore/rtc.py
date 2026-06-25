@@ -52,6 +52,7 @@ Reference:
 """
 
 import calendar
+from datetime import datetime
 from typing import Callable, Optional
 
 
@@ -171,9 +172,21 @@ class RTC:
         self.rmonar = 0
         self.ryrar  = 0
 
+        # Set RTC to current system time (like real battery-backed RTC)
+        now = datetime.now()
+        self.rseccnt = int_to_bcd8(now.second)
+        self.rmincnt = int_to_bcd8(now.minute)
+        self.rhrcnt  = int_to_bcd8(now.hour)
+        self.rwkcnt  = now.weekday()  # 0=Mon on Python datetime, but RTC expects 0=Sun
+        # Adjust: Python Monday=0, RTC Sunday=0
+        self.rwkcnt = (now.weekday() + 1) % 7
+        self.rdaycnt = int_to_bcd8(now.day)
+        self.rmoncnt = int_to_bcd8(now.month)
+        self.ryrcnt  = int_to_bcd16(now.year)
+
         # Control registers
         self.rcr1 = 0
-        self.rcr2 = 0   # START=0 by default (RTC stopped until started)
+        self.rcr2 = RCR2_START   # START=0 by default (RTC stopped until started)
         self.rcr3 = 0
 
         # Periodic interrupt tracking
@@ -208,7 +221,7 @@ class RTC:
 
     def _tick_one(self):
         """Advance the RTC by one 128-Hz tick."""
-        self.r64cnt = (self.r64cnt + 1) & 0xFF
+        self.r64cnt = (self.r64cnt + 1) & 0x7F    # NOT 0xFF
         if self.r64cnt < 128:
             # Still within the same second; check periodic interrupt
             self._check_periodic()

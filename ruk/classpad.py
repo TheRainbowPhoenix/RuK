@@ -67,6 +67,8 @@ class Classpad:
             self._setup_dma()
         if with_display:
             self._setup_display()
+        
+        self.setup_catch_all_mmio()
 
     def _setup_tmu(self):
         """Attach the TMU+ETMU peripheral and an InterruptController."""
@@ -201,21 +203,35 @@ class Classpad:
         # Region 2: 0xA4150000-0xA4160000 (64KB, CPG area -- overlaps region 1
         #            but MemoryMap resolves the first match, so we add it first)
         # Region 3: 0xFEC00000-0xFEC40000 (256KB, undocumented I/O)
-        self._mmio_a4 = Memory(0x1000000)   # 16MB at 0xA4000000
-        self._memory.add(0xA4000000, self._mmio_a4, name="MMIO (A4xxxxxx)", perms="RW")
+        # self._mmio_a4 = Memory(0x1000000)   # 16MB at 0xA4000000
+        # self._memory.add(0xA4000000, self._mmio_a4, name="MMIO (A4xxxxxx)", perms="RW")
 
         # 0xFF000000 area (BSC, UBC, etc.)
-        self._mmio_ff = Memory(0x1000000)   # 16MB at 0xFF000000
-        self._memory.add(0xFF000000, self._mmio_ff, name="MMIO (FFxxxxxx)", perms="RW")
+        # self._mmio_ff = Memory(0x1000000)   # 16MB at 0xFF000000
+        # self._memory.add(0xFF000000, self._mmio_ff, name="MMIO (FFxxxxxx)", perms="RW")
 
-        self._mmio_catchall = Memory(0x40000)   # 256KB at 0xFEC00000
-        self._memory.add(0xFEC00000, self._mmio_catchall, name="MMIO (catch-all)", perms="RW")
+        # self._mmio_catchall = Memory(0x40000)   # 256KB at 0xFEC00000
+        # self._memory.add(0xFEC00000, self._mmio_catchall, name="MMIO (catch-all)", perms="RW")
 
         self.setup_direct_io()
+
+        # self.setup_catch_all_mmio()
 
     def setup_direct_io(self):
         pass
         # 0xFEC0_0000 -> 0xFEFF_FFFF
+
+    def setup_catch_all_mmio(self):
+        """Add catch-all MMIO regions AFTER all specific peripherals so
+        MemoryMap first-match resolution falls through to them."""
+        self._mmio_a4 = Memory(0x1000000)
+        self._memory.add(0xA4000000, self._mmio_a4, name="MMIO (A4xxxxxx)", perms="RW")
+
+        self._mmio_ff = Memory(0x1000000)
+        self._memory.add(0xFF000000, self._mmio_ff, name="MMIO (FFxxxxxx)", perms="RW")
+
+        self._mmio_catchall = Memory(0x40000)
+        self._memory.add(0xFEC00000, self._mmio_catchall, name="MMIO (catch-all)", perms="RW")
 
     @property
     def cpu(self):
@@ -277,8 +293,8 @@ class Classpad:
         # Tick RTC every 1024 steps
         if self._rtc is not None and (step_count & 0x3FF) == 0:
             self._rtc.tick_128hz(1)
-            if not (self._rtc.rcr2 & 0x01):
-                self._rtc.rcr2 |= 0x01
+            # if not (self._rtc.rcr2 & 0x01):
+            #     self._rtc.rcr2 |= 0x01
         # Tick CMT every 128 steps
         if self._tmu is not None and (step_count & 0x7F) == 0:
             self._tmu.tick_cmt(1)
