@@ -37,7 +37,7 @@ def main():
     parser.add_argument('--addin', default='cp400/print_HelloWorld_and_exit.bin',
                         help='Path to the add-in binary')
     parser.add_argument('--start-pc', type=lambda x: int(x, 0),
-                        default=0x8CFF0000,
+                        default=0x8000_0000,
                         help='Start PC for the add-in (default: 0x8CFF0000)')
     args = parser.parse_args()
 

@@ -14,6 +14,8 @@ from ruk.jcore.cpu import Register, CPU
 
 PLATFORM = sys.platform
 
+DSP_REG = ['x0', 'y0', 'a0', 'a1', 'm0', 'rs', 'dsr',
+                                        'x1', 'y1', 'a0g', 'a1g', 'm1', 're', 'rc']
 
 class RegisterWrapper(BaseWrapper):
     def __init__(self, name: str, reg_reg: Register):
@@ -158,7 +160,7 @@ class RegisterFrame(BaseFrame):
 
         i = 0
         for reg in self._regs:
-            if "bank" in reg:
+            if "bank" in reg or reg in DSP_REG:
                 continue # skip bank in display
 
             self._create_register(reg, i)
@@ -230,8 +232,12 @@ class RegisterFrame(BaseFrame):
         def show_memory_map():
             self._show_memory_map()
 
+        def show_lcd_viewer():
+            self._show_lcd_viewer()
+
         refresh["command"] = reload_regs
         memory_map["command"] = show_memory_map
+        screen_view["command"] = show_lcd_viewer
 
     def _show_memory_map(self):
         from ruk.gui.memory_map import MemoryMapWindow
@@ -242,6 +248,17 @@ class RegisterFrame(BaseFrame):
 
         edit_dialog = MemoryMapWindow(root, self._cpu)
         edit_dialog.show()
+
+
+    def _show_lcd_viewer(self):
+        from ruk.gui.lcd_viewer import LCDViewerWindow
+        try:
+            root = self._root
+        except:
+            root = None
+
+        # lcd_viewer = LCDViewerWindow(root, self.??? cp )
+        # lcd_viewer.show()
 
     def do_refresh(self):
         for reg_name in self.regs_wrapper:

@@ -146,7 +146,9 @@ class MemoryMap:
         for start in self._mem:
             mem = self._mem[start]
             mem_len = len(mem)
-            if start <= address <= start + mem_len:
+            # Use < (exclusive) for the upper bound so that two adjacent
+            # regions don't overlap at the boundary.
+            if start <= address < start + mem_len:
                 if mem_len < best_size:
                     best = (mem, start)
                     best_size = mem_len

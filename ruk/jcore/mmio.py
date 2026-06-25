@@ -115,6 +115,13 @@ def attach_tmu(memory_map: MemoryMap, tmu) -> None:
     etmu_dev = MMIODevice(ETMU_BASE, ETMU_REGION_SIZE, tmu, name="ETMU")
     memory_map.add(ETMU_BASE, etmu_dev, name="ETMU", perms="RW")
 
+    # CMT (Compare Match Timer) at 0xA44A0000
+    # Map a small region covering CMSTR (0xA44A0000) and CMCSR/CMCNT/CMCOR (0xA44A0060)
+    cmt_dev1 = MMIODevice(0xA44A0000, 4, tmu, name="CMT")
+    memory_map.add(0xA44A0000, cmt_dev1, name="CMT", perms="RW")
+    cmt_dev2 = MMIODevice(0xA44A0060, 0x10, tmu, name="CMT")
+    memory_map.add(0xA44A0060, cmt_dev2, name="CMT", perms="RW")
+
 
 def attach_rtc(memory_map: MemoryMap, rtc) -> None:
     """

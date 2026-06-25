@@ -44,7 +44,12 @@ class Classpad:
         self._cpu.regs['vbr'] = 0x80020F00  # vector base register (OS exception table)
         self._cpu.regs['sr'] = 0x700000F0   # MD=1, RB=1, BL=1 (privileged, banked, exceptions blocked); IMASK=0xF
 
+        # Register the peripheral auto-tick callback so peripherals
+        # advance even when stepping via the GUI (not just in run()).
+        self._cpu.on_step = self._tick_peripherals
+
         # Optional peripherals
+        self._cpu_step_count = 0   # for auto-ticking RTC
         self._tmu = None
         self._rtc = None
         self._ubc = None
@@ -152,12 +157,14 @@ class Classpad:
         self._ilram = Memory(0x1000)
         self._memory.add(0xE5200000, self._ilram, name="ILRAM", perms="RWX")
 
-        # XRAM (8KB at 0xE5000000) -- DSP X memory
-        self._xram = Memory(0x2000)
+        # XRAM (8KB at 0xE5000000, wraps every 8KB) -- DSP X memory
+        # The OS accesses up to 0xE507FFFF, so we map 512KB and let the
+        # OS handle wrapping (or just provide a large enough buffer).
+        self._xram = Memory(0x80000)   # 512KB (covers wrapping)
         self._memory.add(0xE5000000, self._xram, name="XRAM", perms="RW")
 
-        # YRAM (8KB at 0xE5010000) -- DSP Y memory
-        self._yram = Memory(0x2000)
+        # YRAM (8KB at 0xE5010000, wraps every 8KB) -- DSP Y memory
+        self._yram = Memory(0x80000)   # 512KB
         self._memory.add(0xE5010000, self._yram, name="YRAM", perms="RW")
 
         # RS memory (16KB at 0xFD800000) -- storage memory
@@ -171,6 +178,21 @@ class Classpad:
         # XRAM0 (224KB at 0xFE240000) -- extended RAM
         self._xram0 = Memory(224 * 1024)
         self._memory.add(0xFE240000, self._xram0, name="XRAM0", perms="RW")
+
+        # Additional VRAM/PRAM area at 0xFE280000 (512KB) -- used by OS for display buffers
+        self._vram = Memory(0x80000)   # 512KB
+        self._memory.add(0xFE280000, self._vram, name="VRAM", perms="RW")
+
+        # FE300000 area (1MB) -- more display/OS buffer area, also contains DSP1 at 0xFE3FFD00
+        self._fe3 = Memory(0x100000)
+        self._memory.add(0xFE300000, self._fe3, name="FE3 area (DSP1)", perms="RW")
+
+        # SPU at 0xFE2FFC00 (256 bytes, covers SPU + DSP0 registers)
+        # spu_t starts at 0xFE2FFC00, spu_dsp_t (DSP0) starts at 0xFE2FFD00
+        # Both are within the VRAM area (0xFE280000) but let's be explicit.
+        # DSP1 is at 0xFE3FFD00 (within FE3 area).
+        # These are already covered by the catch-all memory above, so no
+        # additional mapping is needed -- the OS can read/write the registers.
 
         # Catch-all MMIO regions for Casio SH7305 peripheral space.
         # The OS writes to various undocumented MMIO registers during boot.
@@ -250,10 +272,24 @@ class Classpad:
         if self._rtc is not None:
             self._rtc.tick_128hz(ticks_128hz)
 
+    def _tick_peripherals(self, step_count: int):
+        """Auto-tick peripherals.  Called after every CPU step."""
+        # Tick RTC every 1024 steps
+        if self._rtc is not None and (step_count & 0x3FF) == 0:
+            self._rtc.tick_128hz(1)
+            if not (self._rtc.rcr2 & 0x01):
+                self._rtc.rcr2 |= 0x01
+        # Tick CMT every 128 steps
+        if self._tmu is not None and (step_count & 0x7F) == 0:
+            self._tmu.tick_cmt(1)
+
     def run(self):
         while not self._cpu.ebreak:
             try:
                 self._cpu.step()
+                # Peripheral ticking is handled by the on_step callback
+                # registered in __init__, so it works in both run() and
+                # GUI stepping modes.
             except Exception as e:
                 print(f"!!! CPU Error : {e} !!!")
                 self._cpu.stacktrace()

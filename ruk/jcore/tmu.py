@@ -113,6 +113,15 @@ TMU_CHAN_BASE = 0xA4490008   # base of channel 0's TCOR
 TMU_CHAN_STRIDE = 0x0C       # 12 bytes per channel (TCOR/TCNT/TCR)
 TMU_SIZE      = 0x30         # total span we map
 
+# Compare Match Timer (CMT) addresses
+CMT_CMSTR_ADDR = 0xA44A0000   # 16-bit
+CMT_CMCSR_ADDR = 0xA44A0060   # 16-bit
+CMT_CMCNT_ADDR = 0xA44A0064   # 32-bit
+CMT_CMCOR_ADDR = 0xA44A0068   # 32-bit
+CMT_CMCSR_CMF  = 0x8000       # bit 15: compare match flag
+CMT_CMCSR_OVF  = 0x4000       # bit 14: overflow flag
+CMT_CMSTR_STR  = 0x20          # bit 5: compare match start
+
 # Casio SH7305 ETMU -- physical address space.
 # 6 channels at 0x20 stride starting at 0xA44D0030.
 ETMU_CHAN_COUNT = 6
@@ -361,6 +370,14 @@ class TMU:
             for i in range(ETMU_CHAN_COUNT)
         ]
 
+        # Compare Match Timer (CMT) at 0xA44A0000
+        # CMSTR at 0xA44A0000 (16-bit), CMCSR at 0xA44A0060 (16-bit),
+        # CMCNT at 0xA44A0064 (32-bit), CMCOR at 0xA44A0068 (32-bit)
+        self.cmstr = 0     # bit 5 = compare match enable
+        self.cmcsr = 0     # bit 15 = compare match flag, bit 14 = overflow
+        self.cmcnt = 0
+        self.cmcor = 0
+
         # Callback the host can register to deliver IRQs to the CPU/INTC.
         # Signature: on_irq(intevt_code: int) -> None
         self.on_irq: Optional[Callable[[int], None]] = None
@@ -397,11 +414,34 @@ class TMU:
             if intevt is not None:
                 self._raise_irq(intevt)
 
+    def tick_cmt(self, cycles: int = 1):
+        """Advance the Compare Match Timer by `cycles` ticks."""
+        if not (self.cmstr & CMT_CMSTR_STR):
+            return   # CMT not running
+        for _ in range(cycles):
+            self.cmcnt = (self.cmcnt + 1) & 0xFFFFFFFF
+            if self.cmcnt == 0:
+                self.cmcsr |= CMT_CMCSR_OVF
+            # Compare match: if CMCOR=0, match on every wrap (or immediately)
+            if self.cmcnt == self.cmcor or self.cmcor == 0:
+                self.cmcsr |= CMT_CMCSR_CMF
+                # Reset CMCNT (compare match)
+                self.cmcnt = 0
+
     # ---- MMIO read/write ----
 
     def read8(self, addr: int) -> int:
         if addr == TMU_TSTR:
             return self.tstr & 0xFF
+        # CMT registers (8-bit access)
+        if addr == CMT_CMSTR_ADDR:
+            return self.cmstr & 0xFF
+        if addr == CMT_CMSTR_ADDR + 1:
+            return (self.cmstr >> 8) & 0xFF
+        if addr == CMT_CMCSR_ADDR:
+            return self.cmcsr & 0xFF
+        if addr == CMT_CMCSR_ADDR + 1:
+            return (self.cmcsr >> 8) & 0xFF
         # ETMU TSTR / TCR (8-bit registers)
         for ch in self.etmu_channels:
             if addr == ch.base_addr + ETMU_TSTR_OFF:
@@ -416,6 +456,20 @@ class TMU:
         for i, ch in enumerate(self.tmu_channels):
             if addr == self._tmu_chan_addr(i, 0x08):
                 return ch.read_tcr()
+        # CMT registers
+        if addr == CMT_CMSTR_ADDR:
+            return self.cmstr & 0xFFFF
+        if addr == CMT_CMCSR_ADDR:
+            return self.cmcsr & 0xFFFF
+        # CMCNT and CMCOR can also be read as 16-bit
+        if addr == CMT_CMCNT_ADDR:
+            return self.cmcnt & 0xFFFF
+        if addr == CMT_CMCNT_ADDR + 2:
+            return (self.cmcnt >> 16) & 0xFFFF
+        if addr == CMT_CMCOR_ADDR:
+            return self.cmcor & 0xFFFF
+        if addr == CMT_CMCOR_ADDR + 2:
+            return (self.cmcor >> 16) & 0xFFFF
         return 0x0000
 
     def read32(self, addr: int) -> int:
@@ -431,12 +485,30 @@ class TMU:
                 return ch.read_tcor()
             if addr == ch.base_addr + ETMU_TCNT_OFF:
                 return ch.read_tcnt()
+        # CMT registers (32-bit)
+        if addr == CMT_CMCNT_ADDR:
+            return self.cmcnt & 0xFFFFFFFF
+        if addr == CMT_CMCOR_ADDR:
+            return self.cmcor & 0xFFFFFFFF
         return 0x00000000
 
     def write8(self, addr: int, val: int):
         val &= 0xFF
         if addr == TMU_TSTR:
             self._write_tstr(val)
+            return
+        # CMT registers can be written as 8-bit too
+        if addr == CMT_CMSTR_ADDR:
+            self.cmstr = (self.cmstr & 0xFF00) | val
+            return
+        if addr == CMT_CMSTR_ADDR + 1:
+            self.cmstr = (self.cmstr & 0x00FF) | (val << 8)
+            return
+        if addr == CMT_CMCSR_ADDR:
+            self.cmcsr = (self.cmcsr & 0xFF00) | val
+            return
+        if addr == CMT_CMCSR_ADDR + 1:
+            self.cmcsr = (self.cmcsr & 0x00FF) | (val << 8)
             return
         for ch in self.etmu_channels:
             if addr == ch.base_addr + ETMU_TSTR_OFF:
@@ -455,6 +527,31 @@ class TMU:
         # Tolerate 16-bit writes to TSTR (8-bit register)
         if addr == TMU_TSTR:
             self._write_tstr(val & 0xFF)
+            return
+        # CMT registers (16-bit)
+        if addr == CMT_CMSTR_ADDR:
+            self.cmstr = val
+            return
+        if addr == CMT_CMCSR_ADDR:
+            # CMF and OVF are write-0-to-clear
+            if (val & CMT_CMCSR_CMF) == 0:
+                self.cmcsr &= ~CMT_CMCSR_CMF & 0xFFFF
+            if (val & CMT_CMCSR_OVF) == 0:
+                self.cmcsr &= ~CMT_CMCSR_OVF & 0xFFFF
+            self.cmcsr = (self.cmcsr & (CMT_CMCSR_CMF | CMT_CMCSR_OVF)) | (val & ~(CMT_CMCSR_CMF | CMT_CMCSR_OVF) & 0xFFFF)
+            return
+        # CMCNT and CMCOR can also be written as 16-bit (low half)
+        if addr == CMT_CMCNT_ADDR:
+            self.cmcnt = (self.cmcnt & 0xFFFF0000) | (val & 0xFFFF)
+            return
+        if addr == CMT_CMCNT_ADDR + 2:
+            self.cmcnt = (self.cmcnt & 0x0000FFFF) | ((val & 0xFFFF) << 16)
+            return
+        if addr == CMT_CMCOR_ADDR:
+            self.cmcor = (self.cmcor & 0xFFFF0000) | (val & 0xFFFF)
+            return
+        if addr == CMT_CMCOR_ADDR + 2:
+            self.cmcor = (self.cmcor & 0x0000FFFF) | ((val & 0xFFFF) << 16)
             return
 
     def write32(self, addr: int, val: int):
@@ -483,6 +580,13 @@ class TMU:
             if addr == ch.base_addr + ETMU_TCNT_OFF:
                 ch.write_tcnt(val)
                 return
+        # CMT registers (32-bit)
+        if addr == CMT_CMCNT_ADDR:
+            self.cmcnt = val
+            return
+        if addr == CMT_CMCOR_ADDR:
+            self.cmcor = val
+            return
 
     def _write_tstr(self, val: int):
         old = self.tstr

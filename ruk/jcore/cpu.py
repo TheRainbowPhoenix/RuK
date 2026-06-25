@@ -57,6 +57,14 @@ class Register:
             'ssr': 0x0,
             'sgr': 0x0,
             'dbr': 0x0,
+            # DSP registers (SH4AL-DSP)
+            'x0': 0x0, 'x1': 0x0,
+            'y0': 0x0, 'y1': 0x0,
+            'a0': 0x0, 'a0g': 0x0,
+            'a1': 0x0, 'a1g': 0x0,
+            'm0': 0x0, 'm1': 0x0,
+            'rs': 0x0, 're': 0x0, 'rc': 0x0,
+            'dsr': 0x0,
         }
 
     def __getitem__(self, key: Union[int, str]) -> int:
@@ -204,6 +212,13 @@ class CPU:
         # Signature: on_ubc_break(channel: int, match_addr: int) -> bool
         self.on_ubc_break = None
 
+        # Step counter and peripheral tick callback.
+        # The host (Classpad) registers a callback here that ticks
+        # peripherals (RTC, CMT, etc.) every N steps.  This ensures
+        # peripherals advance even when stepping via the GUI.
+        self._step_count = 0
+        self.on_step = None  # callback(step_count: int) -> None
+
     @property
     def reg_pc(self):
         return self._pc_wrap
@@ -314,9 +329,30 @@ class CPU:
             else:
                 op_val = int.from_bytes(ins, "big")
 
-            op, args = self.disassembler.disasm(op_val)
-            callback = self.emulator.resolve(op)
-            callback(**args)
+            try:
+                op, args = self.disassembler.disasm(op_val)
+                callback = self.emulator.resolve(op)
+                callback(**args)
+            except IndexError as e:
+                # Check if this is an unknown instruction or a memory access error
+                err_msg = str(e)
+                if 'not resolved' in err_msg or 'Unknown OPCode' in err_msg:
+                    # Try DSP instruction handler first
+                    from ruk.jcore.dsp import handle_dsp_instruction
+                    if handle_dsp_instruction(self, op_val):
+                        pass  # DSP instruction was handled
+                    else:
+                        # Unknown instruction (likely SH4AL-DSP specific).
+                        if not hasattr(self, '_warned_unknown'):
+                            self._warned_unknown = set()
+                        key = op_val
+                        if key not in self._warned_unknown:
+                            print(f"[WARN] Unknown instruction 0x{op_val:04X} at PC=0x{pre_pc:08X} -- skipping (treating as NOP)")
+                            self._warned_unknown.add(key)
+                        self.pc = (pre_pc + 2) & 0xFFFFFFFF
+                else:
+                    # Memory access error -- re-raise to be caught by the outer handler
+                    raise
 
             # Check for UBC break AFTER the instruction (PCB=1).
             # If the instruction that just executed was at a channel's CAR
@@ -334,6 +370,9 @@ class CPU:
         # instructions can produce 33-bit PCs in Python (which has
         # arbitrary-precision ints); the SH-4 is a 32-bit machine.
         self.pc &= 0xFFFFFFFF
+        self._step_count += 1
+        if self.on_step is not None:
+            self.on_step(self._step_count)
 
     def stacktrace(self):
         self.regs.dump()
