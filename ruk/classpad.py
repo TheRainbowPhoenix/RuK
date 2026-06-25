@@ -330,22 +330,21 @@ class Classpad:
             R64CNT waiting for it to change (at 0xA00008CC); ticking
             every 4 steps means R64CNT advances fast enough for the
             "cmp/gt r4, r0" check (r4=2) to pass within ~12 CPU steps.
-            The real ratio would be ~922K CPU steps per RTC tick (118
-            MHz / 128 Hz), but that's far too slow for emulation.
-          - CMT ticks at ~1 tick per 8 CPU steps (close to the real
-            Pphi/8 ratio on SH7305).  The OS polls CMCSR.CMF waiting
-            for a compare match; ticking every 8 steps means CMCOR=0x1200
-            (4608) fires after ~37K CPU steps, which is fast enough for
-            boot.
+          - CMT ticks every step.  The OS polls CMCSR.CMF waiting for
+            a compare match (at 0x800034CC); with CMCOR=0x1200 (4608),
+            ticking every step means CMF is set after ~4608 CPU steps,
+            which is fast enough for boot.  The real ratio would be
+            ~257 CPU cycles per CMT tick (118 MHz / 459 KHz), but
+            that's too slow for emulation.
         """
         # Tick RTC every 4 steps (R64CNT advances fast enough for boot)
         if self._rtc is not None and (step_count & 0x3) == 0:
             self._rtc.tick_128hz(1)
             if not (self._rtc.rcr2 & 0x01):
                 self._rtc.rcr2 |= 0x01
-        # Tick CMT every 8 steps
-        # so the OS doesn't get stuck in the CMT polling loop.
-        if self._tmu is not None and (step_count & 0x07) == 0:
+        # Tick CMT every step (so CMF gets set fast enough for the
+        # OS polling loop at 0x800034CC)
+        if self._tmu is not None:
             self._tmu.tick_cmt(1)
 
     def run(self):
@@ -358,7 +357,6 @@ class Classpad:
             except Exception as e:
                 print(f"!!! CPU Error : {e} !!!")
                 self._cpu.stacktrace()
-                # Full register dump for debugging
                 self._dump_full_state()
                 if self.debug:
                     raise

@@ -167,6 +167,13 @@ class DebuggerWindow(BaseWindow):
 
         self.control_ctrl.on_stop_callback = on_reset
 
+        # Breakpoints window callback
+        def on_breakpoints():
+            from ruk.gui.breakpoints import BreakpointsWindow
+            BreakpointsWindow(self.get_root(), self.control_ctrl)
+
+        self.control_ctrl.on_breakpoints_callback = on_breakpoints
+
     def attach(self, cp):
         self._cp = cp
 

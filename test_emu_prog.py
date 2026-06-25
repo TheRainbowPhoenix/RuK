@@ -42,6 +42,9 @@ def main():
     parser.add_argument('--start-pc', type=lambda x: int(x, 0),
                         default=0x8000_0000,
                         help='Start PC for the add-in (default: 0x8CFF0000)')
+    parser.add_argument('--sr', type=lambda x: int(x, 0),
+                        default=0x400001F0,
+                        help='Initial SR value (default: 0x400001F0)')
     args = parser.parse_args()
 
 
@@ -100,7 +103,9 @@ def main():
     #     rom = f.read()
 
     cp = Classpad(rom, debug=False, start_pc=args.start_pc,
-                  with_tmu=True, with_rtc=True, with_dma=True, with_display=True)
+                  with_tmu=True, with_rtc=True, with_dma=True, with_display=True,
+                  with_ubc=True)
+    cp.cpu.regs['sr'] = args.sr
 
     # Write the add-in into RAM at 0x8CFF0000
     cp.ram.write_bin(0x8CFF0000 - 0x8C000000, addin)

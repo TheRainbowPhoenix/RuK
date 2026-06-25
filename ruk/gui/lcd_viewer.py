@@ -15,7 +15,8 @@ class LCDViewerWindow(BaseWindow):
     """A window that displays the LCD framebuffer."""
 
     def __init__(self, root: tk.Tk, display):
-        super().__init__(title="LCD Display :: RuK")
+        toplevel = tk.Toplevel(root)
+        super().__init__(title="LCD Display :: RuK", root=toplevel)
         self.display = display
         self._scale = 1   # 1x scaling
         self._w = 360

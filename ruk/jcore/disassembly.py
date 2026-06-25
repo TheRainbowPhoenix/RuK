@@ -69,9 +69,8 @@ class Disassembler:
                 if "d" in fmt_args:
                     fmt_args["d"] *= 4
 
-                print(fmt.format(**fmt_args))
-
                 if self.debug:
+                    print(fmt.format(**fmt_args))
                     if min(abstract_table) <= op_id <= max(abstract_table):
                         print(abstract_table[op_id].format(**fmt_args))
 

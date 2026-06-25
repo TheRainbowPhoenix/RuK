@@ -116,11 +116,28 @@ TMU_SIZE      = 0x30         # total span we map
 # Compare Match Timer (CMT) addresses
 CMT_CMSTR_ADDR = 0xA44A0000   # 16-bit
 CMT_CMCSR_ADDR = 0xA44A0060   # 16-bit
-CMT_CMCNT_ADDR = 0xA44A0064   # 32-bit
-CMT_CMCOR_ADDR = 0xA44A0068   # 32-bit
+CMT_CMCNT_ADDR = 0xA44A0064   # 16-bit (32-bit, but SH-4 CMT uses 16-bit)
+CMT_CMCOR_ADDR = 0xA44A0068   # 16-bit
 CMT_CMCSR_CMF  = 0x8000       # bit 15: compare match flag
 CMT_CMCSR_OVF  = 0x4000       # bit 14: overflow flag
+CMT_CMCSR_CMIE = 0x0020       # bit 5: compare match interrupt enable
+CMT_CMCSR_AUTOSTOP = 0x0100   # bit 8: if 0, auto-stop on compare match
 CMT_CMSTR_STR  = 0x20          # bit 5: compare match start
+
+# CMT interrupt INTEVT code (from IntEvt2_Table / gint)
+# On SH7305, CMT interrupt is at 0x400 (same priority group as TMU0,
+# but different vector).  Actually, looking at gint and the Casio OS,
+# the CMT uses INTEVT 0x400 for channel 0.
+CMT_INTEVT = 0x400
+
+# CMT clock divider ratios (from CMTDivRatio_Table in libCPU73050)
+# Indexed by CMCSR bits 0-2:
+#   0-3: disabled (0)
+#   4:   divide by 8
+#   5:   divide by 32
+#   6:   divide by 128
+#   7:   disabled (0)
+CMT_DIV_RATIO = [0, 0, 0, 0, 8, 32, 128, 0]
 
 # Casio SH7305 ETMU -- physical address space.
 # 6 channels at 0x20 stride starting at 0xA44D0030.
@@ -415,18 +432,34 @@ class TMU:
                 self._raise_irq(intevt)
 
     def tick_cmt(self, cycles: int = 1):
-        """Advance the Compare Match Timer by `cycles` ticks."""
+        """Advance the Compare Match Timer by `cycles` ticks.
+
+        Per the CPU_CMT_Check decomp from libCPU73050:
+          1. CMCNT increments by 1 each tick
+          2. When CMCNT reaches CMCOR, CMF (bit 15) is set in CMCSR
+          3. If CMIE (bit 5) is set, a CMT interrupt is raised
+          4. If AUTOSTOP bit (bit 8) is NOT set, STR (bit 5 of CMSTR)
+             is cleared, stopping the CMT
+          5. CMCNT resets to 0 after a compare match
+
+        CMCNT and CMCOR are 16-bit registers (0xFFFF max).
+        """
         if not (self.cmstr & CMT_CMSTR_STR):
             return   # CMT not running
         for _ in range(cycles):
-            self.cmcnt = (self.cmcnt + 1) & 0xFFFFFFFF
+            self.cmcnt = (self.cmcnt + 1) & 0xFFFF  # 16-bit
             if self.cmcnt == 0:
                 self.cmcsr |= CMT_CMCSR_OVF
-            # Compare match: if CMCOR=0, match on every wrap (or immediately)
-            if self.cmcnt == self.cmcor or self.cmcor == 0:
+            # Compare match: when CMCNT reaches CMCOR
+            if self.cmcnt == self.cmcor:
                 self.cmcsr |= CMT_CMCSR_CMF
-                # Reset CMCNT (compare match)
                 self.cmcnt = 0
+                # Raise interrupt if CMIE is set
+                if self.cmcsr & CMT_CMCSR_CMIE:
+                    self._raise_irq(CMT_INTEVT)
+                # Auto-stop: if bit 8 (AUTOSTOP) is NOT set, clear STR
+                if not (self.cmcsr & CMT_CMCSR_AUTOSTOP):
+                    self.cmstr &= ~CMT_CMSTR_STR & 0xFFFF
 
     # ---- MMIO read/write ----
 

@@ -25,8 +25,8 @@ from ruk.classpad import Classpad
 
 def main():
     parser = argparse.ArgumentParser(description='RuK OS boot / add-in test')
-    parser.add_argument('--max-steps', type=int, default=50000,
-                        help='Maximum number of CPU steps (default: 50000)')
+    parser.add_argument('--max-steps', type=int, default=800000,
+                        help='Maximum number of CPU steps (default: 500000)')
     parser.add_argument('--trace', action='store_true',
                         help='Print each instruction as it executes')
     parser.add_argument('--rom', default='cp400/3070.bin',
@@ -76,10 +76,22 @@ def main():
     max_steps = args.max_steps
     last_pc = 0
     loop_count = 0
+    # Only print trace output when within this many steps of the max
+    trace_window = 500
+    trace_started = False
 
     while not cp.cpu.ebreak and step_count < max_steps:
         try:
-            if trace:
+            # Only trace when near the end (within trace_window steps of max)
+            # or when explicitly tracing.  This makes the run much faster.
+            do_trace = trace and (step_count >= max_steps - trace_window)
+
+            # Print a marker when trace output starts
+            if do_trace and not trace_started:
+                print(f"\n--- Trace output starts (last {trace_window} steps before max) ---")
+                trace_started = True
+
+            if do_trace:
                 pc_before = cp.cpu.pc
                 ins = cp.cpu.mem.read16(pc_before)
                 if isinstance(ins, int):
@@ -121,6 +133,14 @@ def main():
             if cp.cpu.is_sleeping:
                 print(f"\nCPU entered SLEEP at step {step_count}, PC=0x{cp.cpu.pc:08X}")
                 break
+
+            if step_count + 20 >= max_steps:
+                print(f"\n== Close to end : {step_count} / {max_steps}")
+                print(f"  PC=0x{cp.cpu.pc:08X}")
+                r = cp.cpu.regs
+                print(f"  R0=0x{r[0]:08X} R1=0x{r[1]:08X} R2=0x{r[2]:08X} R3=0x{r[3]:08X}")
+                print(f"  R4=0x{r[4]:08X} R5=0x{r[5]:08X} R6=0x{r[6]:08X} R7=0x{r[7]:08X}")
+                print(f"  R14=0x{r[14]:08X} R15=0x{r[15]:08X} SR=0x{r['sr']:08X}")
 
         except IndexError as e:
             print(f"\nCPU error at step {step_count}: {e}")

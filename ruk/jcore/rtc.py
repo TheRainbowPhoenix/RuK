@@ -276,7 +276,6 @@ class RTC:
         # Set the carry flag (always, even if START=0 -- the carry flag
         # indicates R64CNT wrapped, not that the time advanced).
         self.r64cnt = 0
-        # Set the carry flag
         self.rcr1 |= RCR1_CF
 
         # Only advance the date/time registers if START=1

@@ -247,6 +247,13 @@ class UBC:
         # Match on instruction fetch, read cycle, any operand size
         ch.cbr = (1 << CBR_ID_S) | (1 << 1) | CBR_CE
 
+    def clear_breakpoint(self, channel: int):
+        """Disable a UBC channel (clear the breakpoint).
+
+        This is an alias for disable_channel() for clarity.
+        """
+        self.disable_channel(channel)
+
     def disable_channel(self, channel: int):
         """Disable a UBC channel."""
         self.channels[channel].cbr &= ~CBR_CE & 0xFFFFFFFF

@@ -4,6 +4,7 @@ import tkinter as tk
 # os.listdir ?
 resource_map = {
     'start': "res/toolbar/start.png",
+    'pause': "res/toolbar/start.png",  # reuse start icon for pause (toggle)
     'step_over': "res/toolbar/step_over.png",
     'stop': "res/toolbar/stop.png",
     'continue_until_syscall': "res/toolbar/continue_until_syscall.png",
@@ -11,6 +12,7 @@ resource_map = {
     'step_into': "res/toolbar/step_into.png",
     'except_pause_on': "res/toolbar/except_pause_on.png",
     'except_pause_off': "res/toolbar/except_pause_off.png",
+    'breakpoints': "res/toolbar/breakpoint.png",  # reuse for breakpoints
 }
 
 

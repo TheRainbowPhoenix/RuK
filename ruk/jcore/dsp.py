@@ -1313,15 +1313,50 @@ def _op_pabs_sx(cpu, op_val, sx_idx, sy_idx, sub, dct_active):
     return (dz_idx, result, _sign_guard(result), _NO_DEST, 0, 0)
 
 
+def _op_pabs_sy(cpu, op_val, sx_idx, sy_idx, sub, dct_active):
+    """PABS Sy, Dz -- Dz = |Sy|.
+
+    Cases 0xE9 (base), 0xEA (DCT), 0xEB (DCF).
+    """
+    op_class = op_val & 0xFF
+    if op_class == 0xEA and not dct_active:
+        return (_NO_DEST, 0, 0, _NO_DEST, 0, 0)
+    if op_class == 0xEB and dct_active:
+        return (_NO_DEST, 0, 0, _NO_DEST, 0, 0)
+    sy = _i32(cpu.regs[DSP_OP_SY_REG_TABLE[sy_idx]])
+    if sy < 0:
+        result = _u32(-sy)
+    else:
+        result = _u32(sy)
+    dz_idx = _dz_idx_from_du(sub)
+    return (dz_idx, result, _sign_guard(result), _NO_DEST, 0, 0)
+
+
 def _op_pdec_sx(cpu, op_val, sx_idx, sy_idx, sub, dct_active):
     """PDEC Sx, Dz -- Dz = Sx - 1.
 
-    Cases 0x9D (with op_val & 0x30 == 0x10), and Sy variants.
+    Cases 0x9D (base).  PDEC is NOT a DCT/DCF variant -- it always
+    executes.  Per libCPU73050, PDEC subtracts 1 from the full 32-bit
+    value (not just the upper 16 bits).
     """
-    if not dct_active:
-        return (_NO_DEST, 0, 0, _NO_DEST, 0, 0)
     sx = _i32(cpu.regs[DSP_OP_SX_REG_TABLE[sx_idx]])
     result = _u32(sx - 1)
+    dz_idx = _dz_idx_from_du(sub)
+    return (dz_idx, result, _sign_guard(result), _NO_DEST, 0, 0)
+
+
+def _op_pdec_sy(cpu, op_val, sx_idx, sy_idx, sub, dct_active):
+    """PDEC Sy, Dz -- Dz = Sy - 1.
+
+    Cases 0xD9 (base), 0xDA (DCT), 0xDB (DCF).
+    """
+    op_class = op_val & 0xFF
+    if op_class == 0xDA and not dct_active:
+        return (_NO_DEST, 0, 0, _NO_DEST, 0, 0)
+    if op_class == 0xDB and dct_active:
+        return (_NO_DEST, 0, 0, _NO_DEST, 0, 0)
+    sy = _i32(cpu.regs[DSP_OP_SY_REG_TABLE[sy_idx]])
+    result = _u32(sy - 1)
     dz_idx = _dz_idx_from_du(sub)
     return (dz_idx, result, _sign_guard(result), _NO_DEST, 0, 0)
 
@@ -1468,6 +1503,22 @@ def _op_pneg_sx(cpu, op_val, sx_idx, sy_idx, sub, dct_active):
         return (_NO_DEST, 0, 0, _NO_DEST, 0, 0)
     sx = _i32(cpu.regs[DSP_OP_SX_REG_TABLE[sx_idx]])
     result = _u32(-sx)
+    dz_idx = _dz_idx_from_du(sub)
+    return (dz_idx, result, _sign_guard(result), _NO_DEST, 0, 0)
+
+
+def _op_pneg_sy(cpu, op_val, sx_idx, sy_idx, sub, dct_active):
+    """PNEG Sy, Dz -- Dz = -Sy.
+
+    Cases 0xC9 (base), 0xCA (DCT), 0xCB (DCF).
+    """
+    op_class = op_val & 0xFF
+    if op_class == 0xCA and not dct_active:
+        return (_NO_DEST, 0, 0, _NO_DEST, 0, 0)
+    if op_class == 0xCB and dct_active:
+        return (_NO_DEST, 0, 0, _NO_DEST, 0, 0)
+    sy = _i32(cpu.regs[DSP_OP_SY_REG_TABLE[sy_idx]])
+    result = _u32(-sy)
     dz_idx = _dz_idx_from_du(sub)
     return (dz_idx, result, _sign_guard(result), _NO_DEST, 0, 0)
 
@@ -1695,7 +1746,7 @@ _DSP_OP_TABLE = {
     # PRND Sx, Dz (+ DCT/DCF)
     0x98: _op_prnd_sx, 0x99: _op_prnd_sx, 0x9A: _op_prnd_sx, 0x9B: _op_prnd_sx,
 
-    # PINC Sx, Dz (+ DCT/DCF)
+    # PINC Sx, Dz
     0x9D: _op_pinc_sx,
 
     # PSUB Sx, Sy, Dz (+ DCT/DCF) -- 0xA0 is PSUB with carry
@@ -1719,11 +1770,20 @@ _DSP_OP_TABLE = {
     # PCOPY Sx, Dz (+ DCT/DCF)
     0xBD: _op_pcopy_sx, 0xBE: _op_pcopy_sx, 0xBF: _op_pcopy_sx,
 
+    # PNEG Sy, Dz (+ DCT/DCF) -- Sy variant
+    0xC9: _op_pneg_sy, 0xCA: _op_pneg_sy, 0xCB: _op_pneg_sy,
+
     # PSTS MACH, Dz (+ DCT/DCF)
     0xCD: _op_psts_mach, 0xCE: _op_psts_mach, 0xCF: _op_psts_mach,
 
+    # PDEC Sy, Dz (+ DCT/DCF) -- Sy variant
+    0xD9: _op_pdec_sy, 0xDA: _op_pdec_sy, 0xDB: _op_pdec_sy,
+
     # PSTS MACL, Dz (+ DCT/DCF)
     0xDD: _op_psts_macl, 0xDE: _op_psts_macl, 0xDF: _op_psts_macl,
+
+    # PABS Sy, Dz (+ DCT/DCF) -- Sy variant
+    0xE9: _op_pabs_sy, 0xEA: _op_pabs_sy, 0xEB: _op_pabs_sy,
 
     # PLDS Dz, MACH (+ DCT/DCF)
     0xED: _op_plds_mach, 0xEE: _op_plds_mach, 0xEF: _op_plds_mach,
@@ -1741,7 +1801,7 @@ _DSP_NAME_TO_INDEX = {v: k for k, v in _DSP_REG_INDEX_TO_NAME.items()}
 
 
 # ============================================================================
-# CPU_DSPInstructionDouble (stub for now)
+# CPU_DSPInstructionDouble (handles combined op + MOVX/MOVY)
 # ============================================================================
 
 def _cpu_dsp_instruction_double(cpu, op_val: int):
