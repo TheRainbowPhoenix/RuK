@@ -15,6 +15,7 @@ by the Classpad constructor, matching cp-emu's initialization:
 
 Usage:
     python3 test_emu_prog.py [--max-steps N] [--trace]
+    python3 test_emu_prog.py --start-pc 0x8CFF0000  # run add-in instead
 """
 
 import sys

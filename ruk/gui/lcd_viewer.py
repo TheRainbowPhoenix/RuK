@@ -1,7 +1,7 @@
 """
 LCD Display Viewer window for RuK.
 
-Shows the R61523 LCD framebuffer (396x224 RGB565) in a Tkinter window.
+Shows the R61523 LCD framebuffer (640x224 RGB565) in a Tkinter window.
 Can be toggled from the "LCD" button in the toolbar.
 """
 
@@ -17,7 +17,9 @@ class LCDViewerWindow(BaseWindow):
     def __init__(self, root: tk.Tk, display):
         super().__init__(title="LCD Display :: RuK")
         self.display = display
-        self._scale = 2   # 2x scaling (792x448)
+        self._scale = 1   # 1x scaling
+        self._w = 360
+        self._h = 640
         self._auto_refresh = False
         self._refresh_interval = 100   # ms
         self._after_id = None
@@ -40,8 +42,8 @@ class LCDViewerWindow(BaseWindow):
         auto_check.pack(side=tk.LEFT, padx=2)
 
         # Canvas for the LCD
-        canvas_w = 396 * self._scale
-        canvas_h = 224 * self._scale
+        canvas_w = self._w * self._scale
+        canvas_h = self._h * self._scale
         self.canvas = tk.Canvas(self.root, width=canvas_w, height=canvas_h,
                                 bg='black', highlightthickness=0)
         self.canvas.grid(row=1, column=0, sticky='nsew', padx=5, pady=5)
@@ -57,7 +59,7 @@ class LCDViewerWindow(BaseWindow):
         self.canvas.configure(scrollregion=(0, 0, canvas_w, canvas_h))
 
         # Create the PhotoImage for rendering
-        self._image = tk.PhotoImage(width=396, height=224)
+        self._image = tk.PhotoImage(width=self._w, height=self._h)
         self.canvas.create_image(0, 0, anchor=tk.NW, image=self._image)
 
         # Initial render
@@ -86,9 +88,9 @@ class LCDViewerWindow(BaseWindow):
         # Build pixel data as a hex string for PhotoImage.put()
         # PhotoImage.put() expects a list of strings like "#RRGGBB ..."
         pixel_rows = []
-        for y in range(224):
+        for y in range(self._h):
             row_pixels = []
-            for x in range(396):
+            for x in range(self._w):
                 val = fb[y][x] & 0xFFFF
                 r, g, b = self._rgb565_to_rgb(val)
                 row_pixels.append(f"#{r:02X}{g:02X}{b:02X}")

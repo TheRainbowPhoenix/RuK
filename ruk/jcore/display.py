@@ -1,7 +1,7 @@
 """
 R61523 LCD Display controller for the Casio fx-CG50 / CP-400.
 
-The display is a 396x224 pixel TFT LCD interfaced through a parallel
+The display is a 640x224 pixel TFT LCD interfaced through a parallel
 bus at address 0xB4000000.  The PRDR (Port R Data Register) at
 0xA405013C controls the RS pin: when PRDR bit 4 = 0, writes to
 0xB4000000 set the register index; when PRDR bit 4 = 1, writes send
@@ -26,7 +26,7 @@ When RS=1: write/read accesses the selected register.
   Register 0x5A1: Brightness
   Register 0x403: Unknown bitfield
 
-The display is 396 pixels wide x 224 pixels tall.  Each pixel is 16-bit
+The display is 640 pixels wide x 360 pixels tall.  Each pixel is 16-bit
 RGB565 (5 bits red, 6 bits green, 5 bits blue).
 """
 
@@ -37,8 +37,8 @@ from typing import Callable, Optional
 # Constants
 # ===========================================================================
 
-DISPLAY_WIDTH  = 396
-DISPLAY_HEIGHT = 224
+DISPLAY_WIDTH  = 640
+DISPLAY_HEIGHT = 360
 
 # Physical addresses
 DISPLAY_IFACE_ADDR = 0xB4000000   # 16-bit display interface
@@ -67,7 +67,7 @@ class Display:
     """
     R61523 LCD controller.
 
-    Stores a 396x224 pixel framebuffer as a list of 16-bit RGB565 values.
+    Stores a 640x224 pixel framebuffer as a list of 16-bit RGB565 values.
     The host can call `get_framebuffer()` to retrieve the current pixel
     data for rendering in a GUI.
     """
@@ -96,7 +96,7 @@ class Display:
         self.v_ram_start = 0
         self.v_ram_end = DISPLAY_HEIGHT - 1
 
-        # Framebuffer: 224 rows x 396 columns of 16-bit RGB565
+        # Framebuffer: 360 rows x 640 columns of 16-bit RGB565
         # Initialized to white (0xFFFF)
         self._fb = [[0xFFFF] * DISPLAY_WIDTH for _ in range(DISPLAY_HEIGHT)]
 
@@ -106,7 +106,7 @@ class Display:
     # ---- framebuffer access ----
 
     def get_framebuffer(self):
-        """Return the 2D framebuffer (224 rows x 396 cols, 16-bit RGB565)."""
+        """Return the 2D framebuffer (360 rows x 640 cols, 16-bit RGB565)."""
         return self._fb
 
     def get_pixel(self, x: int, y: int) -> int:

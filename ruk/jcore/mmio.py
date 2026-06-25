@@ -178,3 +178,17 @@ def attach_display(memory_map: MemoryMap, display) -> None:
     # Display interface (4 bytes at 0xB4000000, enough for 16/32-bit access)
     disp_dev = MMIODevice(0xB4000000, 4, display, name="Display")
     memory_map.add(0xB4000000, disp_dev, name="Display", perms="RW")
+
+
+def attach_bsc(memory_map: MemoryMap, bsc) -> None:
+    """Map a BSC (Bus State Controller) at 0xFEC10000."""
+    from ruk.jcore.bsc import BSC_BASE, BSC_SIZE
+    bsc_dev = MMIODevice(BSC_BASE, BSC_SIZE, bsc, name="BSC")
+    memory_map.add(BSC_BASE, bsc_dev, name="BSC", perms="RW")
+
+
+def attach_cpg(memory_map: MemoryMap, cpg) -> None:
+    """Map a CPG (Clock Pulse Generator) at 0xA4150000."""
+    from ruk.jcore.cpg import CPG_BASE, CPG_SIZE
+    cpg_dev = MMIODevice(CPG_BASE, CPG_SIZE, cpg, name="CPG")
+    memory_map.add(CPG_BASE, cpg_dev, name="CPG", perms="RW")

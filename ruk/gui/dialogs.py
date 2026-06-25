@@ -97,7 +97,7 @@ class EditBytesDialog(ModalWindow):
         self.mem = self._cpu.mem.read16(self.address)
         self.asm_preview.set(self.disasm(self.mem))
 
-        self.hex_data.set(self.mem.hex())
+        self.hex_data.set(f'{self.mem:04X}')
 
         self.entry = ttk.Entry(self.frame, textvariable=self.hex_data,
                                validatecommand=self.update_preview, validate='all')

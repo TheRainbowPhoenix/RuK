@@ -113,13 +113,17 @@ class RegisterWrapper(BaseWrapper):
 
 
 class RegisterFrame(BaseFrame):
-    def __init__(self, cpu: CPU, root: tk.Tk, **kw):
+    def __init__(self, cpu: CPU, root: tk.Tk, classpad=None, **kw):
         super().__init__()
         self._root = root
         self._cpu = cpu
+        self._cp = classpad  # Reference to the Classpad for LCD/Mem access
         self._regs = cpu.regs
         self._pc = cpu.reg_pc
         self.regs_wrapper: Dict[str, RegisterWrapper] = {}
+        self._lcd_window = None
+        self._mem_window = None
+        self._map_window = None
 
     def set_widgets(self, root):
         """
@@ -230,35 +234,33 @@ class RegisterFrame(BaseFrame):
             self._refresh_callback()
 
         def show_memory_map():
-            self._show_memory_map()
+            from ruk.gui.memory_map import MemoryMapWindow
+            if self._map_window is None or not self._map_window.root.winfo_exists():
+                self._map_window = MemoryMapWindow(self._root, self._cpu)
+            else:
+                self._map_window.root.lift()
 
-        def show_lcd_viewer():
-            self._show_lcd_viewer()
+        def show_memory_view():
+            from ruk.gui.memory_viewer import MemoryViewerWindow
+            if self._mem_window is None or not self._mem_window.root.winfo_exists():
+                self._mem_window = MemoryViewerWindow(self._root, self._cpu)
+            else:
+                self._mem_window.root.lift()
+
+        def show_lcd():
+            if self._cp is not None and self._cp.display is not None:
+                from ruk.gui.lcd_viewer import LCDViewerWindow
+                if self._lcd_window is None or not self._lcd_window.root.winfo_exists():
+                    self._lcd_window = LCDViewerWindow(self._root, self._cp.display)
+                else:
+                    self._lcd_window.root.lift()
+            else:
+                print("[LCD] No display peripheral attached")
 
         refresh["command"] = reload_regs
         memory_map["command"] = show_memory_map
-        screen_view["command"] = show_lcd_viewer
-
-    def _show_memory_map(self):
-        from ruk.gui.memory_map import MemoryMapWindow
-        try:
-            root = self._root
-        except:
-            root = None
-
-        edit_dialog = MemoryMapWindow(root, self._cpu)
-        edit_dialog.show()
-
-
-    def _show_lcd_viewer(self):
-        from ruk.gui.lcd_viewer import LCDViewerWindow
-        try:
-            root = self._root
-        except:
-            root = None
-
-        # lcd_viewer = LCDViewerWindow(root, self.??? cp )
-        # lcd_viewer.show()
+        memory_view["command"] = show_memory_view
+        screen_view["command"] = show_lcd
 
     def do_refresh(self):
         for reg_name in self.regs_wrapper:

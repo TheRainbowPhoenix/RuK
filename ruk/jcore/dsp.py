@@ -5,6 +5,30 @@ Implements the DSP extension instructions that the standard SH-4 opcode
 table doesn't cover.  These are called from the CPU's "unknown instruction"
 path in step().
 
+DSP instruction encoding on the SH4AL-DSP:
+  - Double instructions (MOVX/MOVY): 1111_01xx_xxxx_xxxx (0xF4xx, 0xF5xx)
+  - Operation instructions (PSUB, PADD, PMULS, etc.): 1111_0000_xxxx_xxxx (0xF0xx)
+  - Single memory instructions (MOVS.W/MOVS.L): NOT 0000_0xxx — these are
+    actually encoded differently.
+
+IMPORTANT: The 0000_xxxx space is shared with many system instructions
+(NOP, SLEEP, RTE, ICBI, PREF, etc.).  DSP MOVS instructions are NOT in
+this space.  The confusion arose because ICBI (0x00E3) was mistaken for
+a DSP MOVS instruction.
+
+Actual DSP MOVS encoding (from SH4AL-DSP manual, confirmed by libCPU73050):
+  The DSPSingleInstr_Table in libCPU73050 has 15 entries indexed by the
+  low 4 bits of the instruction.  But the instruction format is actually:
+  
+  1111_0100_xxxx_xxxx for MOVX (X-bus memory access)
+  1111_0101_xxxx_xxxx for MOVY (Y-bus memory access)
+  1111_0000_xxxx_xxxx for DSP operations (PSUB, PADD, etc.)
+
+  The "MOVS" instructions are part of the MOVX/MOVY family, not a separate
+  0000_0xxx encoding.
+
+  The 0000_nnnn_1110_0011 pattern is ICBI @Rn, NOT a DSP instruction.
+
 DSP register file (stored in cpu.regs dict):
   x0, x1   - X-bus data registers (32-bit, upper 16 bits significant for word ops)
   y0, y1   - Y-bus data registers
@@ -82,7 +106,6 @@ DSP_DATA_REG_MAP = {
     15: 'x0',
 }
 
-
 def _u32(val):
     return val & 0xFFFFFFFF
 
@@ -102,17 +125,20 @@ def _i32(val):
     return val
 
 
+
 def is_dsp_instruction(op_val: int) -> bool:
-    """Check if an opcode is a DSP instruction."""
-    # MOVS instructions: 0000_0xxx_xxxx_xxxx where bits 15-11 = 00000
-    # and bit 3-0 != 0 (case 1-15)
-    if (op_val & 0xF800) == 0x0000 and (op_val & 0x000F) != 0 and (op_val & 0x0008) != 0:
-        return True
-    # DSP double instructions (MOVX/MOVY): various 0xF4xx/0xF5xx encodings
-    if (op_val & 0xFF00) in (0xF400, 0xF500, 0xF403, 0xF503):
-        return True
-    # DSP operation instructions: 0xF0xx with specific patterns
+    """
+    Check if an opcode is a DSP instruction.
+    
+    DSP instructions are in the 0xF0xx, 0xF4xx, 0xF5xx ranges.
+    The 0x0xxx range is NOT DSP — it contains system instructions
+    like ICBI, PREF, SYNCO, NOP, SLEEP, etc.
+    """
+    # DSP operation instructions: 0xF0xx
     if (op_val & 0xFF00) == 0xF000:
+        return True
+    # DSP double instructions (MOVX/MOVY): 0xF4xx, 0xF5xx
+    if (op_val & 0xFE00) == 0xF400:  # covers 0xF4xx and 0xF5xx
         return True
     return False
 
@@ -120,9 +146,10 @@ def is_dsp_instruction(op_val: int) -> bool:
 def handle_dsp_instruction(cpu, op_val: int) -> bool:
     """
     Try to execute a DSP instruction.  Returns True if handled, False if not.
-
-    Called from CPU.step() when an unknown instruction is encountered.
     """
+    if not is_dsp_instruction(op_val):
+        return False
+    
     # Check for MOVS instructions (0000_0xxx_xxxx_xxxx with case 1-15)
     if (op_val & 0xF800) == 0x0000 and (op_val & 0x000F) != 0:
         return _handle_movs(cpu, op_val)
@@ -131,11 +158,17 @@ def handle_dsp_instruction(cpu, op_val: int) -> bool:
     if (op_val & 0xFF00) in (0xF400, 0xF500):
         return _handle_movx_movy(cpu, op_val)
 
-    # Check for DSP operation instructions
+    # DSP operation instructions (0xF0xx)
     if (op_val & 0xFF00) == 0xF000:
         return _handle_dsp_operation(cpu, op_val)
 
+    # DSP double instructions (MOVX/MOVY) (0xF4xx, 0xF5xx)
+    if (op_val & 0xFE00) == 0xF400:
+        return _handle_movx_movy(cpu, op_val)
+
     return False
+
+
 
 
 def _handle_movs(cpu, op_val: int) -> bool:

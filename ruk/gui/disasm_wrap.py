@@ -459,29 +459,47 @@ class DisasmFrame(BaseFrame):
                 op_str, args = self.disasm.disasm(val, trace_only=True)
 
                 mod_args = {**args}
+                # For PC-relative loads (mov.l, mov.w), d is multiplied by 4
+                # For branches (bf, bt, bra, bsr, etc.), d is multiplied by 2
+                # Check if this is a branch instruction
+                is_branch = False
+                try:
+                    # Get the mnemonic from the format string
+                    mnem = op_str.split()[0].lower() if ' ' in op_str else op_str.lower()
+                    # Strip format specifiers
+                    mnem = mnem.split('{')[0].strip()
+                    is_branch = mnem in ('bf', 'bf.s', 'bt', 'bt/s', 'bra', 'bsr', 'braf', 'bsrf')
+                except:
+                    pass
+
                 if "d" in mod_args:
-                    mod_args["d"] *= 4
+                    if is_branch:
+                        mod_args["d"] *= 2
+                    else:
+                        mod_args["d"] *= 4
 
                 op_mod = op_str.format(**mod_args)  # op_str % args
                 ops = op_mod.split(" ")
                 op_str = ops[0]
 
-                # Recreate address
-                if op_str in ['bf', 'bra', 'bt', 'bf.s']:  # TODO: move this to a constant list
-                    jmp = args[list(args)[0]]
+                # Recreate address for branches
+                if is_branch and 'd' in args:
+                    jmp = args['d']
 
-                    if op_str in ['bra']:
-                        if (jmp & 0x800) == 0:
-                            jmp = (0x00000FFF & jmp)
-                        else:
-                            jmp = c_long(0xFFFFF000 | jmp).value
+                    # Sign-extend the displacement
+                    if mnem in ('bra', 'bsr'):
+                        # 12-bit signed displacement
+                        if jmp & 0x800:
+                            jmp = jmp - 0x1000
+                    else:
+                        # 8-bit signed displacement
+                        if jmp & 0x80:
+                            jmp = jmp - 0x100
 
-                    var_str = hex(
-                        start_p + (index * 2) +  # Addr
-                        jmp * 2 +  # Jump of N bytes
-                        4
-                    )
+                    target_addr = (start_p + (index * 2) + jmp * 2 + 4) & 0xFFFFFFFF
+                    var_str = hex(target_addr)
 
+                    # Arrow: relative jump in instruction units
                     self.queue_arrow(index, jmp + 2)
 
                 else:

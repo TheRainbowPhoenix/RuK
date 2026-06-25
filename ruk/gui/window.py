@@ -142,7 +142,7 @@ class DebuggerWindow(BaseWindow):
         """
         regs_frame = tk.Frame(master=self.root, width=200, height=100)
 
-        self.reg_ctrl_frame: RegisterFrame = RegisterFrame(self._cp.cpu, root)
+        self.reg_ctrl_frame: RegisterFrame = RegisterFrame(self._cp.cpu, root, classpad=self._cp)
         self.reg_ctrl_frame.hook(regs_frame)
         self.reg_ctrl_frame.set_refresh_callback(self.refresh_all)
         self.frames.append(self.reg_ctrl_frame)

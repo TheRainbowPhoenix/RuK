@@ -100,7 +100,7 @@ def main():
     #     rom = f.read()
 
     cp = Classpad(rom, debug=False, start_pc=args.start_pc,
-                  with_tmu=True, with_rtc=True, with_dma=True)
+                  with_tmu=True, with_rtc=True, with_dma=True, with_display=True)
 
     # Write the add-in into RAM at 0x8CFF0000
     cp.ram.write_bin(0x8CFF0000 - 0x8C000000, addin)

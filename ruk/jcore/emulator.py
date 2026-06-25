@@ -158,6 +158,10 @@ class Emulator:
         self._reg(110, self.MULL)        # MUL.L Rm, Rn
         self._reg(112, self.MULSW)       # MULS.W Rm, Rn
         self._reg(113, self.MULUW)       # MULU.W Rm, Rn
+        self._reg(101, self.DMULS)       # DMULS.L Rm, Rn
+        self._reg(102, self.DMULU)       # DMULU.L Rm, Rn
+        self._reg(108, self.MACL)        # MAC.L @Rm+, @Rn+
+        self._reg(109, self.MACW)        # MAC.W @Rm+, @Rn+
         self._reg(114, self.NEG)         # NEG Rm, Rn
         self._reg(115, self.NEGC)        # NEGC Rm, Rn
         self._reg(116, self.SUB)         # SUB Rm, Rn
@@ -220,6 +224,10 @@ class Emulator:
         self._reg(216, self.OCBP)        # OCBP @Rn
         self._reg(217, self.OCBWB)       # OCBWB @Rn
         self._reg(218, self.PREF)        # PREF @Rn
+
+        self._reg(300, self.ICBI)        # ICBI @Rn (custom ID)
+        self._reg(301, self.PREFI)       # PREFI @Rn (custom ID)
+        self._reg(302, self.SYNCO)       # SYNCO (custom ID)
         self._reg(221, self.RTE)         # RTE
         self._reg(224, self.SETS)        # SETS
         self._reg(225, self.SETT)        # SETT
@@ -239,6 +247,8 @@ class Emulator:
         self._reg(187, self.LDCL_SPC)    # LDC.L @Rm+, SPC
         self._reg(188, self.LDC_DBR)     # LDC Rm, DBR
         self._reg(189, self.LDCL_DBR)    # LDC.L @Rm+, DBR
+        self._reg(190, self.LDC_BANK)    # LDC Rm, Rn_BANK
+        self._reg(191, self.LDCL_BANK)   # LDC.L @Rm+, Rn_BANK
 
         # LDS Rm, PR/MACH/MACL
         self._reg(194, self.LDS_MACH)    # LDS Rm, MACH
@@ -263,6 +273,8 @@ class Emulator:
         self._reg(246, self.STCL_SPC)    # STC.L SPC, @-Rn
         self._reg(247, self.STC_DBR)     # STC DBR, Rn
         self._reg(248, self.STCL_DBR)    # STC.L DBR, @-Rn
+        self._reg(249, self.STC_BANK)    # STC Rm_BANK, Rn
+        self._reg(250, self.STCL_BANK)   # STC.L Rm_BANK, @-Rn
 
         # STS PR/MACH/MACL, Rn
         self._reg(251, self.STS_MACH)    # STS MACH, Rn
@@ -867,6 +879,66 @@ class Emulator:
         self.cpu.regs['macl'] = _u32(self.cpu.regs[n] * self.cpu.regs[m])
         self.cpu.pc = _u32(self.cpu.pc + 2)
 
+    def DMULS(self, m: int, n: int):
+        """DMULS.L Rm, Rn: signed 32x32 -> 64-bit -> MACH:MACL."""
+        result = _i32(self.cpu.regs[n]) * _i32(self.cpu.regs[m])
+        result &= 0xFFFFFFFFFFFFFFFF
+        self.cpu.regs['mach'] = _u32((result >> 32) & 0xFFFFFFFF)
+        self.cpu.regs['macl'] = _u32(result & 0xFFFFFFFF)
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def DMULU(self, m: int, n: int):
+        """DMULU.L Rm, Rn: unsigned 32x32 -> 64-bit -> MACH:MACL."""
+        result = self.cpu.regs[n] * self.cpu.regs[m]
+        self.cpu.regs['mach'] = _u32((result >> 32) & 0xFFFFFFFF)
+        self.cpu.regs['macl'] = _u32(result & 0xFFFFFFFF)
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def MACL(self, m: int, n: int):
+        """MAC.L @Rm+, @Rn+: 32x32 signed multiply-accumulate -> MACH:MACL."""
+        src1 = self.cpu.mem.read32(self.cpu.regs[m])
+        if isinstance(src1, bytes):
+            src1 = int.from_bytes(src1, 'big')
+        src2 = self.cpu.mem.read32(self.cpu.regs[n])
+        if isinstance(src2, bytes):
+            src2 = int.from_bytes(src2, 'big')
+        self.cpu.regs[m] = _u32(self.cpu.regs[m] + 4)
+        self.cpu.regs[n] = _u32(self.cpu.regs[n] + 4)
+        # Signed multiply, accumulate into MACH:MACL
+        prod = _i32(src1) * _i32(src2)
+        # Accumulate (simplified -- no saturation)
+        old = (self.cpu.regs['mach'] << 32) | self.cpu.regs['macl']
+        result = old + prod
+        result &= 0xFFFFFFFFFFFFFFFF
+        self.cpu.regs['mach'] = _u32((result >> 32) & 0xFFFFFFFF)
+        self.cpu.regs['macl'] = _u32(result & 0xFFFFFFFF)
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def MACW(self, m: int, n: int):
+        """MAC.W @Rm+, @Rn+: 16x16 signed multiply-accumulate -> MACH:MACL."""
+        src1 = self.cpu.mem.read16(self.cpu.regs[m])
+        if isinstance(src1, bytes):
+            src1 = int.from_bytes(src1, 'big')
+        src2 = self.cpu.mem.read16(self.cpu.regs[n])
+        if isinstance(src2, bytes):
+            src2 = int.from_bytes(src2, 'big')
+        self.cpu.regs[m] = _u32(self.cpu.regs[m] + 2)
+        self.cpu.regs[n] = _u32(self.cpu.regs[n] + 2)
+        # Sign-extend 16-bit
+        s1 = _i32(src1 & 0xFFFF)
+        if s1 & 0x8000:
+            s1 -= 0x10000
+        s2 = _i32(src2 & 0xFFFF)
+        if s2 & 0x8000:
+            s2 -= 0x10000
+        prod = s1 * s2
+        old = (self.cpu.regs['mach'] << 32) | self.cpu.regs['macl']
+        result = old + prod
+        result &= 0xFFFFFFFFFFFFFFFF
+        self.cpu.regs['mach'] = _u32((result >> 32) & 0xFFFFFFFF)
+        self.cpu.regs['macl'] = _u32(result & 0xFFFFFFFF)
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
     def MULSW(self, m: int, n: int):
         """MULS.W Rm, Rn: (signed)Rn * (signed)Rm -> MACL (low 16 bits)."""
         a = _i32(self.cpu.regs[n]) & 0xFFFF
@@ -1258,6 +1330,18 @@ class Emulator:
         """PREF @Rn: prefetch.  NOP."""
         self.cpu.pc = _u32(self.cpu.pc + 2)
 
+    def ICBI(self, n: int):
+        """ICBI @Rn: instruction cache block invalidate.  NOP (no cache)."""
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def PREFI(self, n: int):
+        """PREFI @Rn: instruction prefetch.  NOP."""
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def SYNCO(self):
+        """SYNCO: pipeline synchronization barrier.  NOP."""
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
     def TRAPA(self, i: int):
         """TRAPA #imm: trap exception.  PC -> SPC, SR -> SSR, EXPEVT=0x160, PC = VBR+0x100."""
         imm = i & 0xFF
@@ -1327,6 +1411,34 @@ class Emulator:
     def LDCL_SSR(self, m: int):    self._ldcl(m, 'ssr')
     def LDCL_SPC(self, m: int):    self._ldcl(m, 'spc')
     def LDCL_DBR(self, m: int):    self._ldcl(m, 'dbr')
+
+    # ---- LDC/STC banked registers (R0_BANK..R7_BANK) ----
+    def LDC_BANK(self, m: int, n: int):
+        """LDC Rm, Rn_BANK: load Rm into the nth banked register."""
+        self.cpu.regs[f'r{n}_bank'] = _u32(self.cpu.regs[m])
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def LDCL_BANK(self, m: int, n: int):
+        """LDC.L @Rm+, Rn_BANK: load from memory into nth banked register."""
+        addr = self.cpu.regs[m]
+        val = self.cpu.mem.read32(addr)
+        if isinstance(val, bytes):
+            val = int.from_bytes(val, 'big')
+        self.cpu.regs[f'r{n}_bank'] = _u32(val)
+        self.cpu.regs[m] = _u32(addr + 4)
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def STC_BANK(self, m: int, n: int):
+        """STC Rm_BANK, Rn: read mth banked register into Rn."""
+        self.cpu.regs[n] = _u32(self.cpu.regs[f'r{m}_bank'])
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def STCL_BANK(self, m: int, n: int):
+        """STC.L Rm_BANK, @-Rn: push mth banked register to stack."""
+        addr = _u32(self.cpu.regs[n] - 4)
+        self.cpu.regs[n] = addr
+        self.cpu.mem.write32(addr, self.cpu.regs[f'r{m}_bank'])
+        self.cpu.pc = _u32(self.cpu.pc + 2)
 
     # ---- LDS Rm, REG ----
     def LDS_MACH(self, m: int):
