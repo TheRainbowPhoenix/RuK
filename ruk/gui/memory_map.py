@@ -20,35 +20,37 @@ class MemoryMapWindow(BaseWindow):
         self.root.columnconfigure(0, weight=1)
 
         """
-        memory_list: all memory maps
+        memory_list: all memory maps, including MMIO peripherals
         """
 
-        tree = ttk.Treeview(self.root, columns=("Offset Start", "Offset End", "Name", "Permission"), show="headings")
-        tree.heading("Offset Start", text="Offset Start")
-        tree.heading("Offset End", text="Offset End")
+        tree = ttk.Treeview(self.root, columns=("Start", "End", "Name", "Perm", "Type"), show="headings")
+        tree.heading("Start", text="Start Address")
+        tree.heading("End", text="End Address")
         tree.heading("Name", text="Name")
-        tree.heading("Permission", text="Permission")
+        tree.heading("Perm", text="Perm")
+        tree.heading("Type", text="Type")
 
-        tree.column("Offset Start", width=80)
-        tree.column("Offset End", width=80)
+        tree.column("Start", width=100)
+        tree.column("End", width=100)
         tree.column("Name", width=200)
-        tree.column("Permission", width=80)
-
-        print(self.cpu)
+        tree.column("Perm", width=50)
+        tree.column("Type", width=80)
 
         maps = []
 
         for start, end, name, perms in self.cpu.mem.get_mapped_areas():
+            # Determine the type based on the address range
+            mem_type = self._classify_region(start, end, name)
             maps.append({
-                "Offset Start": f"0x{start:04X}",
-                "Offset End": f"0x{end - 1:04X}",
+                "Start": f"0x{start:08X}",
+                "End": f"0x{end - 1:08X}",
                 "Name": name,
-                "Permission": perms
+                "Perm": perms,
+                "Type": mem_type
             })
 
-
         for m in maps:
-            tree.insert("", "end", values=(m["Offset Start"], m["Offset End"], m["Name"], m["Permission"]))
+            tree.insert("", "end", values=(m["Start"], m["End"], m["Name"], m["Perm"], m["Type"]))
 
         tree.grid(row=0, column=0, sticky='nsew')
 
@@ -61,11 +63,44 @@ class MemoryMapWindow(BaseWindow):
 
         self.root.deiconify()
 
+    @staticmethod
+    def _classify_region(start: int, end: int, name: str) -> str:
+        """Classify a memory region as RAM, ROM, MMIO, etc."""
+        if name in ("TMU", "ETMU"):
+            return "MMIO (TMU)"
+        if name == "RTC":
+            return "MMIO (RTC)"
+        if name == "UBC":
+            return "MMIO (UBC)"
+        if name == "DMA":
+            return "MMIO (DMA)"
+        if 0xA4490000 <= start <= 0xA44FFFFF:
+            return "MMIO (Timer)"
+        if 0xA44D0000 <= start <= 0xA44DFFFF:
+            return "MMIO (ETMU)"
+        if 0xA4130000 <= start <= 0xA413FFFF:
+            return "MMIO (RTC)"
+        if 0xFF200000 <= start <= 0xFF20FFFF:
+            return "MMIO (UBC)"
+        if 0xFE000000 <= start <= 0xFEFFFFFF:
+            return "MMIO (Peripheral)"
+        if 0xA4000000 <= start <= 0xA4FFFFFF:
+            return "MMIO"
+        if 0x80000000 <= start <= 0x9FFFFFFF:
+            return "ROM (P1)"
+        if 0xA0000000 <= start <= 0xBFFFFFFF:
+            return "ROM (P2)"
+        if 0x8C000000 <= start <= 0x8CFFFFFF:
+            return "RAM (P1)"
+        if 0xAC000000 <= start <= 0xACFFFFFF:
+            return "RAM (P2)"
+        if start < 0x100000:
+            return "Null page"
+        return "Unknown"
 
     def setup_callbacks(self):
         pass
 
     def attach(self, cp):
         pass
-
 

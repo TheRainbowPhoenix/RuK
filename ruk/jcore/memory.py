@@ -3,43 +3,78 @@ from typing import Tuple, Union
 
 class Memory:
     """
-    Simple bytearray wrapper
+    Simple bytearray wrapper.
+
+    All read methods return int (unsigned).  All write methods accept int.
+    This is a change from the original RuK API which returned bytes for
+    read16/read32 and accepted bytes for write_bin -- the int-everywhere
+    convention is needed because the emulator's MOV.B/W/L handlers pass
+    ints to write8/16/32, and the CPU's step() does arithmetic on the
+    values returned by read16.
     """
 
     def __init__(self, size):
         self._mem = bytearray(size)
         self._ptr = 0
 
-    def read8(self, addr: int) -> bytes:
+    def read8(self, addr: int) -> int:
         """
-        Read 8 bits in memory
+        Read 8 bits in memory.
         :param addr: memory addr
-        :return:
+        :return: int in [0, 0xFF]
         """
-        return self._mem[addr]
+        return self._mem[addr] & 0xFF
 
-    def read16(self, addr: int) -> bytes:
+    def read16(self, addr: int) -> int:
         """
-        read 16 bits in memory
+        Read 16 bits in memory (big-endian, matching the SH-4's
+        big-endian bus when the host is also big-endian-aware).
         :param addr: memory addr
-        :return:
+        :return: int in [0, 0xFFFF]
         """
-        if 0 <= addr+2 <= len(self._mem):
-            # TODO: endianness ?
-            return self._mem[addr:addr+2]
-        raise IndexError(f'Out of bound read16 : \"{addr:04X}\"')
+        if 0 <= addr + 2 <= len(self._mem):
+            return int.from_bytes(self._mem[addr:addr + 2], "big")
+        raise IndexError(f'Out of bound read16 : "{addr:04X}"')
 
-    def read32(self, addr) -> bytes:
-        if 0 <= addr+4 <= len(self._mem):
-            # TODO: endianness ?
-            return self._mem[addr:addr+4]
-        raise IndexError(f'Out of bound read32 : \"{addr:04X}\"')
+    def read32(self, addr: int) -> int:
+        """
+        Read 32 bits in memory (big-endian).
+        :param addr: memory addr
+        :return: int in [0, 0xFFFFFFFF]
+        """
+        if 0 <= addr + 4 <= len(self._mem):
+            return int.from_bytes(self._mem[addr:addr + 4], "big")
+        raise IndexError(f'Out of bound read32 : "{addr:04X}"')
 
     def write8(self, addr, val: int) -> int:
-        self._mem[addr] = val
+        self._mem[addr] = val & 0xFF
         return val
 
-    def write_bin(self, addr: int, data: bytes) -> None:
+    def write16(self, addr: int, val: int):
+        """Write 16 bits (big-endian)."""
+        if 0 <= addr + 2 <= len(self._mem):
+            self._mem[addr:addr + 2] = (val & 0xFFFF).to_bytes(2, "big")
+            return
+        raise IndexError(f'Out of bound write16 : "{addr:04X}"')
+
+    def write32(self, addr: int, val: int):
+        """Write 32 bits (big-endian)."""
+        if 0 <= addr + 4 <= len(self._mem):
+            self._mem[addr:addr + 4] = (val & 0xFFFFFFFF).to_bytes(4, "big")
+            return
+        raise IndexError(f'Out of bound write32 : "{addr:04X}"')
+
+    def write_bin(self, addr: int, data) -> None:
+        """
+        Write raw bytes to memory.  Accepts both `bytes` and `int`:
+        - bytes: written as-is (used by the loader)
+        - int: treated as a single byte (used by the old API and by
+          MemoryMap.write8/16/32 when they fall back to write_bin)
+        """
+        if isinstance(data, int):
+            self._mem[addr] = data & 0xFF
+            self._ptr = addr + 1
+            return
         self._mem[addr: addr + len(data)] = data
         self._ptr = addr + len(data)
 
@@ -112,34 +147,22 @@ class MemoryMap:
         # no memory mapped
         raise IndexError(f'Address is unmapped : {hex(address)}')
 
-    def read32(self, address: int):
-        # try:
+    def read32(self, address: int) -> int:
         mem, start = self.resolve(address)
-        # except IndexError:
-        #     raise IndexError
-        # Can read 4bytes ?
-        if address+3 <= start + len(mem):
+        if address + 3 <= start + len(mem):
             return mem.read32(address - start)
-        raise IndexError(f'Address overflow : {hex(address)}')   # pragma: no cover
+        raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover
 
-    def read16(self, address: int):
-        # try:
+    def read16(self, address: int) -> int:
         mem, start = self.resolve(address)
-        # except IndexError:
-        #     raise IndexError
-        # Can read 4bytes ?
-        if address+1 <= start + len(mem):
+        if address + 1 <= start + len(mem):
             return mem.read16(address - start)
         raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover
 
-    def read8(self, address: int):
-        # try:
+    def read8(self, address: int) -> int:
         mem, start = self.resolve(address)
-        # except IndexError:
-        #     raise IndexError
-        # Can read 1bytes ?
         if address <= start + len(mem):
-            return bytes((mem.read8(address - start),))
+            return mem.read8(address - start)
         raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover
 
     def get_arround(self, address: Union[int, bytearray], size: int):
@@ -156,7 +179,7 @@ class MemoryMap:
         # start_p = address - size
         # end_p = address + size
         start_p = address
-        end_p = address + size*2
+        end_p = address + size * 2
 
         if end_p <= start or start_p >= start + len(mem):
             raise IndexError(f'Reading out of memory bounds : {hex(address)} +- {size}')
@@ -168,48 +191,57 @@ class MemoryMap:
             end_p -= diff
 
         if start <= start_p and end_p <= start + len(mem):
-            return start_p, end_p, mem.get_range(start_p-start, end_p-start)
+            return start_p, end_p, mem.get_range(start_p - start, end_p - start)
 
         if start_p < start:
             start_p = start
-            end_p = start+size*2
-            return start_p, end_p, mem.get_range(0, size*2)
+            end_p = start + size * 2
+            return start_p, end_p, mem.get_range(0, size * 2)
 
         # TODO: if at end, etc
         raise IndexError(f"Edge case not handled : {start_p} {end_p}")
         # return start_p, end_p, b'\x0f'*(size*2)
 
-    def write32(self, address: int, bytes_data: bytes):
+    def write32(self, address: int, val):
         """
-        Potentially dangerous function that write anywhere in memory.
-        Used for the "Edit" functions of the GUI
+        Write 32 bits.  Accepts both int and bytes (4-byte big-endian).
         """
+        if isinstance(val, int):
+            v = val & 0xFFFFFFFF
+        else:
+            v = int.from_bytes(val, "big")
         mem, start = self.resolve(address)
         # Can write 4bytes ?
         if address + 3 <= start + len(mem):
-            return mem.write_bin(address - start, bytes_data)
+            return mem.write32(address - start, v)
         raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover
 
-    def write16(self, address: int, bytes_data: bytes):
+    def write16(self, address: int, val):
         """
-        Potentially dangerous function that write anywhere in memory.
-        Used for the "Edit" functions of the GUI
+        Write 16 bits.  Accepts both int and bytes (2-byte big-endian).
         """
+        if isinstance(val, int):
+            v = val & 0xFFFF
+        else:
+            v = int.from_bytes(val, "big")
         mem, start = self.resolve(address)
         # Can write 2bytes ?
         if address + 1 <= start + len(mem):
-            return mem.write_bin(address - start, bytes_data)
+            return mem.write16(address - start, v)
         raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover
 
-    def write8(self, address: int, bytes_data: bytes):
+    def write8(self, address: int, val):
         """
-        Potentially dangerous function that write anywhere in memory.
-        Used for the "Edit" functions of the GUI
+        Write 8 bits.  Accepts both int and bytes (1-byte).
         """
+        if isinstance(val, int):
+            v = val & 0xFF
+        else:
+            v = val[0] if len(val) > 0 else 0
         mem, start = self.resolve(address)
         # Can write 1bytes ?
         if address <= start + len(mem):
-            return mem.write_bin(address - start, bytes_data)
+            return mem.write8(address - start, v)
         raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover
 
     def get_mapped_areas(self):
