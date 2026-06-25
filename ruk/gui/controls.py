@@ -26,7 +26,7 @@ class ControlsFrame(BaseFrame):
             'Continue until breakpoint',
         ]
 
-        self.continue_until_mode = 1  # default: continue until breakpoint
+        self.continue_until_mode = 2  # default: continue until breakpoint
         self.except_pause = 1
 
         # Run state for non-blocking do_run()
@@ -143,7 +143,7 @@ class ControlsFrame(BaseFrame):
             self.continue_until_btn.configure(image=self.resources['continue_until_syscall'])
             self.continue_until_btn_tooltip.text = "Continue until Syscall"
         else:
-            self.continue_until_btn.configure(image=self.resources['continue_until_syscall'])
+            self.continue_until_btn.configure(image=self.resources['continue_until_breakpoint'])
             self.continue_until_btn_tooltip.text = "Continue until Breakpoint"
 
     def except_pause_changed(self):
@@ -198,7 +198,7 @@ class ControlsFrame(BaseFrame):
 
         # Check for software breakpoints before each step
         # (HW breakpoints are handled by the UBC in CPU.step)
-        batch_size = 1000
+        batch_size = 500
         for _ in range(batch_size):
             if self._cpu.ebreak:
                 break
@@ -253,14 +253,19 @@ class ControlsFrame(BaseFrame):
 
     def add_soft_breakpoint(self, addr: int):
         """Add a software breakpoint at the given address."""
+        if not hasattr(self, '_soft_breakpoints'):
+            self._soft_breakpoints = set()
         self._soft_breakpoints.add(addr & 0xFFFFFFFF)
 
     def remove_soft_breakpoint(self, addr: int):
         """Remove a software breakpoint."""
-        self._soft_breakpoints.discard(addr & 0xFFFFFFFF)
+        if hasattr(self, '_soft_breakpoints'):
+            self._soft_breakpoints.discard(addr & 0xFFFFFFFF)
 
     def toggle_soft_breakpoint(self, addr: int) -> bool:
         """Toggle a software breakpoint.  Returns True if now set."""
+        if not hasattr(self, '_soft_breakpoints'):
+            self._soft_breakpoints = set()
         addr &= 0xFFFFFFFF
         if addr in self._soft_breakpoints:
             self._soft_breakpoints.discard(addr)
@@ -275,6 +280,8 @@ class ControlsFrame(BaseFrame):
         Returns the channel number (0 or 1), or -1 if both channels
         are in use.
         """
+        if not hasattr(self, '_hw_breakpoints'):
+            self._hw_breakpoints = {}
         addr &= 0xFFFFFFFF
         # Check if already set
         for a, ch in self._hw_breakpoints.items():
@@ -293,27 +300,31 @@ class ControlsFrame(BaseFrame):
 
     def remove_hw_breakpoint(self, addr: int):
         """Remove a hardware breakpoint."""
-        addr &= 0xFFFFFFFF
-        if addr in self._hw_breakpoints:
-            ch = self._hw_breakpoints.pop(addr)
-            if self._cpu.ubc is not None:
-                # Disable the UBC channel
-                self._cpu.ubc.clear_breakpoint(ch)
+        if hasattr(self, '_hw_breakpoints'):
+            addr &= 0xFFFFFFFF
+            if addr in self._hw_breakpoints:
+                ch = self._hw_breakpoints.pop(addr)
+                if self._cpu.ubc is not None:
+                    self._cpu.ubc.clear_breakpoint(ch)
 
     def get_all_breakpoints(self):
         """Return a dict of all breakpoints: {addr: 'soft' or 'hw'}."""
         result = {}
-        for addr in self._soft_breakpoints:
-            result[addr] = 'soft'
-        for addr in self._hw_breakpoints:
-            result[addr] = 'hw'
+        if hasattr(self, '_soft_breakpoints'):
+            for addr in self._soft_breakpoints:
+                result[addr] = 'soft'
+        if hasattr(self, '_hw_breakpoints'):
+            for addr in self._hw_breakpoints:
+                result[addr] = 'hw'
         return result
 
     def clear_all_breakpoints(self):
         """Remove all breakpoints."""
-        self._soft_breakpoints.clear()
-        for addr in list(self._hw_breakpoints.keys()):
-            self.remove_hw_breakpoint(addr)
+        if hasattr(self, '_soft_breakpoints'):
+            self._soft_breakpoints.clear()
+        if hasattr(self, '_hw_breakpoints'):
+            for addr in list(self._hw_breakpoints.keys()):
+                self.remove_hw_breakpoint(addr)
 
     def do_show_breakpoints(self):
         """Show the breakpoints window.

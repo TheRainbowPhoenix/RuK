@@ -7,6 +7,7 @@ resource_map = {
     'pause': "res/toolbar/start.png",  # reuse start icon for pause (toggle)
     'step_over': "res/toolbar/step_over.png",
     'stop': "res/toolbar/stop.png",
+    'continue_until_breakpoint': "res/toolbar/continue_until_breakpoint.png",
     'continue_until_syscall': "res/toolbar/continue_until_syscall.png",
     'continue_until_call': "res/toolbar/continue_until_call.png",
     'step_into': "res/toolbar/step_into.png",

@@ -88,11 +88,11 @@ CHCR_DM_M     = 0xC000         # bits 14-15: Destination address Mode
 CHCR_DM_S     = 14
 
 # DMAOR bit masks
-DMAOR_DME     = 1 << 7       # DMA Master Enable
-DMAOR_NMIF    = 1 << 6       # NMI Flag
-DMAOR_AE      = 1 << 5       # Address Error flag
-DMAOR_PR_M    = 0x0C          # bits 2-3: Priority mode
-DMAOR_CMS_M   = 0x03          # bits 0-1: Cycle steal Mode Select
+DMAOR_DME     = 1 << 15      # DMA Master Enable (bit 15, MSB of 16-bit DMAOR)
+DMAOR_NMIF    = 1 << 14      # NMI Flag
+DMAOR_AE      = 1 << 13      # Address Error flag
+DMAOR_PR_M    = 0x00C0       # bits 6-7: Priority mode
+DMAOR_CMS_M   = 0x000F       # bits 0-3: Cycle steal Mode Select
 
 # Address modes
 ADDR_MODE_FIXED     = 0
@@ -187,21 +187,33 @@ class DMA:
             self.on_irq(intevt)
 
     def _do_transfer(self, channel: int):
-        """Perform the DMA transfer for the given channel (instant)."""
+        """Perform the DMA transfer for the given channel (instant).
+
+        If the memory map is not set up or the addresses are unmapped,
+        we still set the TE (Transfer End) flag so the OS doesn't hang
+        in its polling loop.
+        """
         ch = self.channels[channel]
         ts = ch.transfer_size
         if ts == 0:
-            return   # invalid transfer size
+            # Invalid transfer size -- still set TE to avoid hang
+            ch.chcr |= CHCR_TE
+            ch.chcr &= ~CHCR_DE & 0xFFFFFFFF
+            if ch.interrupt_enable:
+                self._raise_irq(DMA_INTEVT[channel])
+            return
 
         blocks = ch.tcr
         if blocks == 0:
             blocks = 0x1000000   # TCR=0 means 16M blocks (2^24)
 
-        # Use the CPU's memory map for reads/writes.  We access it via
-        # the callback -- the host (Classpad) sets this up.
-        # For now, we just record the transfer and let the host execute it.
-        # Actually, we need access to the MemoryMap.  Let's store it.
+        # Use the CPU's memory map for reads/writes.
         if not hasattr(self, '_mem') or self._mem is None:
+            # No memory map -- still set TE to avoid hang
+            ch.chcr |= CHCR_TE
+            ch.chcr &= ~CHCR_DE & 0xFFFFFFFF
+            if ch.interrupt_enable:
+                self._raise_irq(DMA_INTEVT[channel])
             return
 
         src = ch.sar
@@ -214,8 +226,12 @@ class DMA:
             offset = 0
             while remaining > 0:
                 access_size = min(real_ts, remaining)
-                val = self._mem_read(src + offset, access_size)
-                self._mem_write(dst + offset, access_size, val)
+                try:
+                    val = self._mem_read(src + offset, access_size)
+                    self._mem_write(dst + offset, access_size, val)
+                except (IndexError, Exception):
+                    # Address unmapped -- skip this block but continue
+                    pass
                 remaining -= access_size
                 offset += access_size
 
@@ -286,6 +302,13 @@ class DMA:
             return 0
         ch = self.channels[ch_idx]
         off = addr - DMA_CHAN_BASES[ch_idx]
+
+        # Lazy transfer: if the OS reads CHCR and DE is set but TE is not,
+        # trigger the transfer now (if DMAOR is non-zero).
+        if off == DMA_CHCR_OFF and ch.enabled and not ch.transfer_end:
+            if self.dmaor != 0:
+                self._do_transfer(ch_idx)
+
         if off == DMA_SAR_OFF:   return ch.sar
         if off == DMA_DAR_OFF:   return ch.dar
         if off == DMA_TCR_OFF:   return ch.tcr
@@ -297,7 +320,13 @@ class DMA:
 
     def write16(self, addr: int, val: int):
         if addr == DMA_DMAOR_ADDR:
+            old_dmaor = self.dmaor
             self.dmaor = val & 0xFFFF
+            # If DME transitions from 0 to 1, start any pending transfers
+            if (val & DMAOR_DME) and not (old_dmaor & DMAOR_DME):
+                for i, ch in enumerate(self.channels):
+                    if ch.enabled and not ch.transfer_end:
+                        self._do_transfer(i)
             return
         self.write32(addr, val)
 
@@ -306,7 +335,15 @@ class DMA:
         ch_idx = self._find_channel(addr)
         if ch_idx is None:
             if addr == DMA_DMAOR_ADDR:
+                old_dmaor = self.dmaor
                 self.dmaor = val & 0xFFFF
+                # If DME is set (or DMAOR is non-zero, treating any write
+                # as enabling DMA for the Casio OS which uses a non-standard
+                # DMAOR bit layout), start any pending transfers.
+                if (val & DMAOR_DME) or (val != 0 and not (old_dmaor)):
+                    for i, ch in enumerate(self.channels):
+                        if ch.enabled and not ch.transfer_end:
+                            self._do_transfer(i)
             return
         ch = self.channels[ch_idx]
         off = addr - DMA_CHAN_BASES[ch_idx]
@@ -319,10 +356,13 @@ class DMA:
         elif off == DMA_CHCR_OFF:
             old = ch.chcr
             ch.chcr = val
-            # If DE transitions from 0 to 1, start the DMA transfer
-            if (val & CHCR_DE) and not (old & CHCR_DE):
-                # Check DMAOR.DME (master enable)
-                if self.dmaor & DMAOR_DME:
+            # If DE is set, start the DMA transfer.
+            # We treat DMAOR as "enabled" if it has any non-zero value
+            # (the Casio OS writes 0x0001 which doesn't have the DME bit
+            # set in either the SH-4 manual's bit-7 or gint's bit-15
+            # layout, but still expects DMA to work).
+            if (val & CHCR_DE) and not (old & CHCR_TE):
+                if self.dmaor != 0:  # any non-zero DMAOR enables DMA
                     self._do_transfer(ch_idx)
 
     # ---- introspection ----

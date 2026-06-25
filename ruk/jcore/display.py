@@ -37,8 +37,8 @@ from typing import Callable, Optional
 # Constants
 # ===========================================================================
 
-DISPLAY_WIDTH  = 640
-DISPLAY_HEIGHT = 360
+DISPLAY_WIDTH  = 360
+DISPLAY_HEIGHT = 640
 
 # Physical addresses
 DISPLAY_IFACE_ADDR = 0xB4000000   # 16-bit display interface

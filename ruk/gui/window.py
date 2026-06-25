@@ -135,6 +135,10 @@ class DebuggerWindow(BaseWindow):
         self.asm_view = DisasmFrame(self._cp.cpu, self.resources)
         self.asm_view.hook(asm_frame)
         self.asm_view.set_refresh_callback(self.refresh_all)
+        # Give the disasm view a reference to the control frame so it
+        # can access breakpoints for drawing in the gutter and for
+        # the "Toggle breakpoint" context menu.
+        self.asm_view._control_ctrl = self.control_ctrl
         asm_frame.pack(fill=tk.BOTH, side=tk.LEFT, expand=True, anchor=tk.CENTER)
 
         """

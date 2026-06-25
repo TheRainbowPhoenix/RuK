@@ -451,7 +451,7 @@ class TMU:
             if self.cmcnt == 0:
                 self.cmcsr |= CMT_CMCSR_OVF
             # Compare match: when CMCNT reaches CMCOR
-            if self.cmcnt == self.cmcor:
+            if self.cmcnt == self.cmcor or self.cmcor == 0:
                 self.cmcsr |= CMT_CMCSR_CMF
                 self.cmcnt = 0
                 # Raise interrupt if CMIE is set

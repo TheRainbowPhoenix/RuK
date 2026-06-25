@@ -382,10 +382,15 @@ class DisasmFrame(BaseFrame):
         self._context_menu.add_command(label="Set PC here", underline=0,
                                        command=self.do_pc_set)
         # TODO: self._context_menu.add_command(label="Continue until here")
-        self._context_menu.add_separator()
-        self._context_menu.add_command(label="Add breakpoint", underline=0, state=tk.DISABLED)
-        self._context_menu.add_command(label="Advanced breakpoint...", underline=0, state=tk.DISABLED)
+        # self._context_menu.add_separator()
+        # self._context_menu.add_command(label="Add breakpoint", underline=0, state=tk.DISABLED)
+        # self._context_menu.add_command(label="Advanced breakpoint...", underline=0, state=tk.DISABLED)
         # TODO: breakpoint
+        self._context_menu.add_separator()
+        self._context_menu.add_command(label="Toggle breakpoint", underline=0,
+                                       command=self.do_toggle_breakpoint)
+        self._context_menu.add_command(label="Toggle HW breakpoint", underline=0,
+                                       command=self.do_toggle_hw_breakpoint)
         self._context_menu.add_separator()
         # self._context_menu.add_cascade(label="Edit")
 
@@ -393,6 +398,39 @@ class DisasmFrame(BaseFrame):
         self._context_menu.add_command(label="NOP Instruction", state=tk.DISABLED)
         self._context_menu.add_command(label="Edit bytes...", underline=0,
                                        command=self.do_memory_edit)
+
+    def do_toggle_breakpoint(self):
+        """Toggle a software breakpoint at the selected line."""
+        line_pos: int = self._cursors['select']['line']
+        try:
+            line = self._buffer[line_pos]
+            addr = int(line.addr_var.get(), 16)
+            # Get the control frame from the parent window
+            ctrl = getattr(self, '_control_ctrl', None)
+            if ctrl is not None:
+                ctrl.toggle_soft_breakpoint(addr)
+                self.refresh_asm()
+        except (IndexError, KeyError, ValueError) as e:
+            print(f"Toggle breakpoint error: {e}")
+
+    def do_toggle_hw_breakpoint(self):
+        """Toggle a hardware breakpoint at the selected line."""
+        line_pos: int = self._cursors['select']['line']
+        try:
+            line = self._buffer[line_pos]
+            addr = int(line.addr_var.get(), 16)
+            ctrl = getattr(self, '_control_ctrl', None)
+            if ctrl is not None:
+                bps = ctrl.get_all_breakpoints()
+                if addr in bps and bps[addr] == 'hw':
+                    ctrl.remove_hw_breakpoint(addr)
+                else:
+                    ch = ctrl.add_hw_breakpoint(addr)
+                    if ch < 0:
+                        print("Both hardware breakpoint channels are in use")
+                self.refresh_asm()
+        except (IndexError, KeyError, ValueError) as e:
+            print(f"Toggle HW breakpoint error: {e}")
 
     def refresh_cusor(self):
         self.canvas.coords(self._cursors['pc']['ref'],
@@ -417,6 +455,50 @@ class DisasmFrame(BaseFrame):
             self.gutter_size + 1,
             self.CURSOR_FILL_HEIGHT)
         self.draw_arrows()
+        self.draw_breakpoints()
+
+    def draw_breakpoints(self):
+        """Draw breakpoint circles in the gutter.
+
+        Software breakpoints are drawn as red circles.
+        Hardware breakpoints are drawn as blue circles.
+        """
+        # Clear existing breakpoint markers
+        if hasattr(self, '_bp_markers'):
+            for marker in self._bp_markers:
+                self.canvas.delete(marker)
+        self._bp_markers = []
+
+        ctrl = getattr(self, '_control_ctrl', None)
+        if ctrl is None:
+            return
+
+        bps = ctrl.get_all_breakpoints()
+        if not bps:
+            return
+
+        # Get the start address of the visible disassembly
+        try:
+            start_p, end_p, mem = self._cpu.get_surrounding_memory(size=self.BUF_SIZE)
+        except IndexError:
+            return
+
+        # Draw a circle for each breakpoint that's in the visible range
+        sz = preferences.current_font.size
+        radius = max(3, sz // 3)
+        for addr in bps:
+            btype = bps[addr]
+            # Check if this address is in the visible range
+            line_idx = (addr - start_p) // 2
+            if 0 <= line_idx < self.BUF_SIZE:
+                y = line_y(line_idx) + line_height() // 2
+                x = self.gutter_size // 2
+                color = '#FF0000' if btype == 'soft' else '#0000FF'
+                marker = self.canvas.create_oval(
+                    x - radius, y - radius,
+                    x + radius, y + radius,
+                    fill=color, outline='black', width=1)
+                self._bp_markers.append(marker)
 
     def refresh_display(self):
         for line in self._buffer:
@@ -468,7 +550,7 @@ class DisasmFrame(BaseFrame):
                     mnem = op_str.split()[0].lower() if ' ' in op_str else op_str.lower()
                     # Strip format specifiers
                     mnem = mnem.split('{')[0].strip()
-                    is_branch = mnem in ('bf', 'bf.s', 'bt', 'bt/s', 'bra', 'bsr', 'braf', 'bsrf')
+                    is_branch = mnem in ('bf', 'bra', 'bt', 'bf.s', 'bt.s', 'bsr', 'braf', 'bsrf')
                 except:
                     pass
 
@@ -506,7 +588,6 @@ class DisasmFrame(BaseFrame):
                     var_str = ' '.join(ops[1:]) if len(ops) > 1 else ''
                 # text_str += 'pseudocode'
                 text_str = f'; {val:04X}'
-                # line = f"{addr_str} {op_str:<8} {var_str}"
 
             except IndexError:
                 var_str = f'0x{val:04x}'

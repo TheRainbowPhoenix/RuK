@@ -42,9 +42,18 @@ class LCDViewerWindow(BaseWindow):
                                      command=self._toggle_auto)
         auto_check.pack(side=tk.LEFT, padx=2)
 
+        # Determine display dimensions
+        if self.display is not None:
+            fb = self.display.get_framebuffer()
+            self._fb_width = len(fb[0]) if fb and len(fb) > 0 else self._w
+            self._fb_height = len(fb) if fb else self._h
+        else:
+            self._fb_width = self._w
+            self._fb_height = self._h
+
         # Canvas for the LCD
-        canvas_w = self._w * self._scale
-        canvas_h = self._h * self._scale
+        canvas_w = self._fb_width * self._scale
+        canvas_h = self._fb_height * self._scale
         self.canvas = tk.Canvas(self.root, width=canvas_w, height=canvas_h,
                                 bg='black', highlightthickness=0)
         self.canvas.grid(row=1, column=0, sticky='nsew', padx=5, pady=5)
@@ -60,7 +69,7 @@ class LCDViewerWindow(BaseWindow):
         self.canvas.configure(scrollregion=(0, 0, canvas_w, canvas_h))
 
         # Create the PhotoImage for rendering
-        self._image = tk.PhotoImage(width=self._w, height=self._h)
+        self._image = tk.PhotoImage(width=self._fb_width, height=self._fb_height)
         self.canvas.create_image(0, 0, anchor=tk.NW, image=self._image)
 
         # Initial render
@@ -86,12 +95,27 @@ class LCDViewerWindow(BaseWindow):
             return
 
         fb = self.display.get_framebuffer()
+        if not fb:
+            return
+
+        # Get actual framebuffer dimensions (may differ from 396x224)
+        fb_height = len(fb)
+        fb_width = len(fb[0]) if fb_height > 0 else 0
+        if fb_width == 0 or fb_height == 0:
+            return
+
         # Build pixel data as a hex string for PhotoImage.put()
         # PhotoImage.put() expects a list of strings like "#RRGGBB ..."
+        # Resize the PhotoImage if dimensions don't match
+        if self._image is None or self._image.width() != fb_width or self._image.height() != fb_height:
+            self._image = tk.PhotoImage(width=fb_width, height=fb_height)
+            self.canvas.delete("all")
+            self.canvas.create_image(0, 0, anchor=tk.NW, image=self._image)
+
         pixel_rows = []
-        for y in range(self._h):
+        for y in range(fb_height):
             row_pixels = []
-            for x in range(self._w):
+            for x in range(fb_width):
                 val = fb[y][x] & 0xFFFF
                 r, g, b = self._rgb565_to_rgb(val)
                 row_pixels.append(f"#{r:02X}{g:02X}{b:02X}")
@@ -101,6 +125,7 @@ class LCDViewerWindow(BaseWindow):
 
         # Scale up by zooming (PhotoImage zoom)
         self._image_zoomed = self._image.zoom(self._scale, self._scale)
+        # Update the canvas image (delete old zoomed image first to avoid stacking)
         self.canvas.create_image(0, 0, anchor=tk.NW, image=self._image_zoomed)
 
     def _toggle_auto(self):

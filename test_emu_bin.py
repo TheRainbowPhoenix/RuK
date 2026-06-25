@@ -37,10 +37,10 @@ def main():
                         help='Print each instruction as it executes')
     parser.add_argument('--rom', default='cp400/3070.bin',
                         help='Path to the OS ROM (default: cp400/3070.bin)')
-    parser.add_argument('--addin', default='bare_metal/lcd_color_bars.bin',
+    parser.add_argument('--addin', default='cp400/print_HelloWorld_and_exit.bin',
                         help='Path to the add-in binary')
     parser.add_argument('--start-pc', type=lambda x: int(x, 0),
-                        default=0x8C000000,
+                        default=0x8000_0000,
                         help='Start PC for the add-in (default: 0x8CFF0000)')
     parser.add_argument('--sr', type=lambda x: int(x, 0),
                         default=0x400001F0,
@@ -108,7 +108,7 @@ def main():
     cp.cpu.regs['sr'] = args.sr
 
     # Write the add-in into RAM at 0x8CFF0000
-    cp.ram.write_bin(0x8C000000 - 0x8C000000, addin)
+    cp.ram.write_bin(0x8CFF0000 - 0x8C000000, addin)
     print(f"Add-in loaded at 0x{args.start_pc:08X}")
     print(f"CPU state: PC=0x{cp.cpu.pc:08X} R15=0x{cp.cpu.regs[15]:08X} "
           f"VBR=0x{cp.cpu.regs['vbr']:08X} SR=0x{cp.cpu.regs['sr']:08X}")
