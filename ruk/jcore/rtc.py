@@ -52,7 +52,7 @@ Reference:
 """
 
 import calendar
-from datetime import datetime
+import datetime
 from typing import Callable, Optional
 
 
@@ -152,16 +152,24 @@ class RTC:
     interrupts may fire.
     """
 
-    def __init__(self):
-        # Time counters (all in BCD except R64CNT and RWKCNT)
-        self.r64cnt  = 0           # 0..127 (128 Hz counter)
-        self.rseccnt = int_to_bcd8(0)
-        self.rmincnt = int_to_bcd8(0)
-        self.rhrcnt  = int_to_bcd8(0)
-        self.rwkcnt  = 0           # 0=Sun..6=Sat (plain binary, not BCD)
-        self.rdaycnt = int_to_bcd8(1)    # default to day 1
-        self.rmoncnt = int_to_bcd8(1)    # default to month 1
-        self.ryrcnt  = int_to_bcd16(2010)  # cp-emu default
+    def __init__(self, init_to_system_time: bool = True):
+        """Initialize the RTC.
+
+        Args:
+            init_to_system_time: If True (default), populate the date/time
+                counters with the current system time.  This is important
+                because the Casio OS boot code polls R64CNT waiting for it
+                to change, and also reads the date/time registers during
+                initialization.  Starting with the system time ensures
+                the OS sees meaningful values instead of all-zeros.
+
+                If False, the RTC starts at the cp-emu defaults
+                (2010-01-01 00:00:00).
+        """
+        if init_to_system_time:
+            self._init_to_system_time()
+        else:
+            self._init_to_defaults()
 
         # Alarm registers
         self.rsecar = 0
@@ -172,21 +180,9 @@ class RTC:
         self.rmonar = 0
         self.ryrar  = 0
 
-        # Set RTC to current system time (like real battery-backed RTC)
-        now = datetime.now()
-        self.rseccnt = int_to_bcd8(now.second)
-        self.rmincnt = int_to_bcd8(now.minute)
-        self.rhrcnt  = int_to_bcd8(now.hour)
-        self.rwkcnt  = now.weekday()  # 0=Mon on Python datetime, but RTC expects 0=Sun
-        # Adjust: Python Monday=0, RTC Sunday=0
-        self.rwkcnt = (now.weekday() + 1) % 7
-        self.rdaycnt = int_to_bcd8(now.day)
-        self.rmoncnt = int_to_bcd8(now.month)
-        self.ryrcnt  = int_to_bcd16(now.year)
-
         # Control registers
         self.rcr1 = 0
-        self.rcr2 = RCR2_START   # START=0 by default (RTC stopped until started)
+        self.rcr2 = 0   # START=0 by default (RTC stopped until started)
         self.rcr3 = 0
 
         # Periodic interrupt tracking
@@ -194,6 +190,40 @@ class RTC:
 
         # Callback for delivering IRQs to the INTC
         self.on_irq: Optional[Callable[[int], None]] = None
+
+    def _init_to_defaults(self):
+        """Initialize counters to the cp-emu defaults (2010-01-01 00:00:00)."""
+        # Time counters (all in BCD except R64CNT and RWKCNT)
+        self.r64cnt  = 0           # 0..127 (128 Hz counter)
+        self.rseccnt = int_to_bcd8(0)
+        self.rmincnt = int_to_bcd8(0)
+        self.rhrcnt  = int_to_bcd8(0)
+        self.rwkcnt  = 0           # 0=Sun..6=Sat (plain binary, not BCD)
+        self.rdaycnt = int_to_bcd8(1)    # default to day 1
+        self.rmoncnt = int_to_bcd8(1)    # default to month 1
+        self.ryrcnt  = int_to_bcd16(2010)  # cp-emu default
+
+    def _init_to_system_time(self):
+        """Initialize counters to the current system time.
+
+        This populates the BCD date/time registers (RSECCNT, RMINCNT,
+        RHRCNT, RWKCNT, RDAYCNT, RMONCNT, RYRCNT) with the host's
+        current local time.  R64CNT starts at a non-zero value (so the
+        OS polling loop sees an immediate change on the first read).
+        """
+        now = datetime.datetime.now()
+        # Python's weekday(): Monday=0..Sunday=6
+        # SH-4 RTC RWKCNT: Sunday=0..Saturday=6
+        sh_wkday = (now.weekday() + 1) % 7   # Mon=1, Tue=2, ..., Sun=0
+
+        self.r64cnt  = (now.microsecond // (1_000_000 // 128)) & 0x7F
+        self.rseccnt = int_to_bcd8(now.second)
+        self.rmincnt = int_to_bcd8(now.minute)
+        self.rhrcnt  = int_to_bcd8(now.hour)
+        self.rwkcnt  = sh_wkday
+        self.rdaycnt = int_to_bcd8(now.day)
+        self.rmoncnt = int_to_bcd8(now.month)
+        self.ryrcnt  = int_to_bcd16(now.year)
 
     # ---- IRQ delivery ----
     def _raise_irq(self, intevt: int):
@@ -213,24 +243,49 @@ class RTC:
 
         One tick = 1/128 second.  The standard calling rate is 128
         ticks per second (i.e. once per ~7.8 ms).
+
+        The R64CNT counter (64-Hz / 128-Hz divider) ALWAYS advances,
+        regardless of the RCR2.START bit -- it's a free-running counter
+        that the OS polls to detect elapsed time.  The date/time
+        registers (RSECCNT, RMINCNT, etc.) only advance when START=1.
+
+        This is important for OS boot: the Casio OS polls R64CNT
+        waiting for it to change BEFORE it sets RCR2.START.  If we
+        gate R64CNT on START, the OS hangs forever in the polling loop.
         """
         for _ in range(cycles):
-            if not (self.rcr2 & RCR2_START):
-                continue   # RTC is stopped
             self._tick_one()
 
     def _tick_one(self):
-        """Advance the RTC by one 128-Hz tick."""
-        self.r64cnt = (self.r64cnt + 1) & 0x7F    # NOT 0xFF
+        """Advance the RTC by one 128-Hz tick.
+
+        R64CNT always advances (free-running).  The date/time registers
+        only advance when RCR2.START=1.
+        """
+        # R64CNT always advances (it's a free-running 128-Hz counter)
+        self.r64cnt = (self.r64cnt + 1) & 0xFF
+
+        # Check periodic interrupt (always checked, regardless of START)
+        self._check_periodic()
+
         if self.r64cnt < 128:
-            # Still within the same second; check periodic interrupt
-            self._check_periodic()
+            # Still within the same second
             return
 
-        # R64CNT rolled over: a new second has begun
+        # R64CNT rolled over: a new second has begun.
+        # Set the carry flag (always, even if START=0 -- the carry flag
+        # indicates R64CNT wrapped, not that the time advanced).
         self.r64cnt = 0
         # Set the carry flag
         self.rcr1 |= RCR1_CF
+
+        # Only advance the date/time registers if START=1
+        if not (self.rcr2 & RCR2_START):
+            # START=0: RTC time is stopped, but R64CNT still ticks.
+            # Still fire the carry interrupt if RCR1.CIE is set.
+            if self.rcr1 & RCR1_CIE:
+                self._raise_irq(RTC_INTEVT_CARRY)
+            return
 
         # Increment seconds
         sec = bcd8_to_int(self.rseccnt) + 1

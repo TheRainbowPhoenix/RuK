@@ -5,7 +5,8 @@ from ruk.jcore.memory import Memory, MemoryMap
 class Classpad:
     def __init__(self, rom: bytes, debug: bool = False, start_pc=None, ram_size: int = 0x100_0000,
                  with_tmu: bool = False, with_rtc: bool = False, with_ubc: bool = False,
-                 with_dma: bool = False, with_display: bool = False):
+                 with_dma: bool = False, with_display: bool = False,
+                 with_bsc: bool = True, with_cpg: bool = True):
         """
         Create a virtual Classpad II.
 
@@ -18,6 +19,8 @@ class Classpad:
                          for hardware breakpoints.
         :param with_dma: If True, attach a DMA controller (6 channels).
         :param with_display: If True, attach an R61523 LCD display.
+        :param with_bsc: If True, attach a BSC (Bus State Controller).
+        :param with_cpg: If True, attach a CPG (Clock Pulse Generator).
         """
         # TODO: get real values !!
         self._ram = Memory(ram_size)
@@ -55,6 +58,8 @@ class Classpad:
         self._ubc = None
         self._dma = None
         self._display = None
+        self._bsc = None
+        self._cpg = None
         self._intc = None
 
         if with_tmu:
@@ -67,6 +72,10 @@ class Classpad:
             self._setup_dma()
         if with_display:
             self._setup_display()
+        if with_bsc:
+            self._setup_bsc()
+        if with_cpg:
+            self._setup_cpg()
         
         self.setup_catch_all_mmio()
 
@@ -137,6 +146,20 @@ class Classpad:
 
         self._display = Display()
         attach_display(self._memory, self._display)
+
+    def _setup_bsc(self):
+        """Attach the BSC (Bus State Controller)."""
+        from ruk.jcore.bsc import BSC
+        from ruk.jcore.mmio import attach_bsc
+        self._bsc = BSC()
+        attach_bsc(self._memory, self._bsc)
+
+    def _setup_cpg(self):
+        """Attach the CPG (Clock Pulse Generator) + Power (MSTPCR)."""
+        from ruk.jcore.cpg import CPG
+        from ruk.jcore.mmio import attach_cpg
+        self._cpg = CPG()
+        attach_cpg(self._memory, self._cpg)
 
     def load_rom(self, rom: bytes):
         self._rom.write_bin(0, rom)
@@ -267,6 +290,16 @@ class Classpad:
         return self._display
 
     @property
+    def bsc(self):
+        """The BSC peripheral, or None if not attached."""
+        return self._bsc
+
+    @property
+    def cpg(self):
+        """The CPG peripheral, or None if not attached."""
+        return self._cpg
+
+    @property
     def intc(self):
         """The InterruptController, or None if not attached."""
         return self._intc
@@ -289,14 +322,30 @@ class Classpad:
             self._rtc.tick_128hz(ticks_128hz)
 
     def _tick_peripherals(self, step_count: int):
-        """Auto-tick peripherals.  Called after every CPU step."""
-        # Tick RTC every 1024 steps
-        if self._rtc is not None and (step_count & 0x3FF) == 0:
+        """Auto-tick peripherals.  Called after every CPU step.
+
+        Tick rates are calibrated to let the Casio OS boot code make
+        forward progress on its polling loops:
+          - RTC R64CNT ticks at ~1 tick per 4 CPU steps.  The OS polls
+            R64CNT waiting for it to change (at 0xA00008CC); ticking
+            every 4 steps means R64CNT advances fast enough for the
+            "cmp/gt r4, r0" check (r4=2) to pass within ~12 CPU steps.
+            The real ratio would be ~922K CPU steps per RTC tick (118
+            MHz / 128 Hz), but that's far too slow for emulation.
+          - CMT ticks at ~1 tick per 8 CPU steps (close to the real
+            Pphi/8 ratio on SH7305).  The OS polls CMCSR.CMF waiting
+            for a compare match; ticking every 8 steps means CMCOR=0x1200
+            (4608) fires after ~37K CPU steps, which is fast enough for
+            boot.
+        """
+        # Tick RTC every 4 steps (R64CNT advances fast enough for boot)
+        if self._rtc is not None and (step_count & 0x3) == 0:
             self._rtc.tick_128hz(1)
-            # if not (self._rtc.rcr2 & 0x01):
-            #     self._rtc.rcr2 |= 0x01
-        # Tick CMT every 128 steps
-        if self._tmu is not None and (step_count & 0x7F) == 0:
+            if not (self._rtc.rcr2 & 0x01):
+                self._rtc.rcr2 |= 0x01
+        # Tick CMT every 8 steps
+        # so the OS doesn't get stuck in the CMT polling loop.
+        if self._tmu is not None and (step_count & 0x07) == 0:
             self._tmu.tick_cmt(1)
 
     def run(self):

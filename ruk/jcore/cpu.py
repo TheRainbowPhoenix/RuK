@@ -65,6 +65,7 @@ class Register:
             'm0': 0x0, 'm1': 0x0,
             'rs': 0x0, 're': 0x0, 'rc': 0x0,
             'dsr': 0x0,
+            'mod': 0x0,    # DSP mode register (used by repeat loops)
         }
 
     def __getitem__(self, key: Union[int, str]) -> int:
@@ -361,6 +362,46 @@ class CPU:
             if self._ubc_break_pending:
                 self.pc &= 0xFFFFFFFF
                 return
+
+            # ---- DSP repeat-loop handling (SH4AL-DSP) ----
+            # If we just executed the instruction at RE (repeat end) and
+            # RC != 0, decrement RC and branch back to RS (repeat start).
+            # This implements the zero-overhead loop.
+            #
+            # The DSR.DC bit (bit 0) is updated to reflect the new RC
+            # state: DC=1 if RC != 0 (loop continues), DC=0 if RC == 0
+            # (loop just ended).  This is what DCT/DCF variants check.
+            #
+            # Note: On real hardware, the repeat-loop check happens
+            # BEFORE the instruction at RE is executed (the instruction
+            # at RE is the LAST one in the loop, not the first one
+            # outside).  We approximate this by checking if the NEXT PC
+            # (after the just-executed instruction) equals RE.
+            try:
+                rc = self.regs['rc'] & 0xFFFFFFFF
+                re_addr = self.regs['re'] & 0xFFFFFFFF
+                rs_addr = self.regs['rs'] & 0xFFFFFFFF
+                # Check if we're about to enter the repeat region (PC == RE
+                # after this instruction means the next instruction is at RE,
+                # which is the loop exit point).
+                # Actually, the standard semantics: when PC reaches RE and
+                # RC > 0, decrement RC; if RC > 0 after decrement, branch
+                # to RS.  We check this AFTER the instruction executes.
+                if (self.pc & 0xFFFFFFFF) == re_addr and rc > 0:
+                    # Decrement RC
+                    new_rc = (rc - 1) & 0xFFFFFFFF
+                    self.regs['rc'] = new_rc
+                    # Update DSR.DC bit
+                    if new_rc > 0:
+                        self.regs['dsr'] |= 1   # DC = 1 (loop continues)
+                        # Branch back to RS
+                        self.pc = rs_addr & 0xFFFFFFFF
+                    else:
+                        self.regs['dsr'] &= ~1 & 0xFFFFFFFF  # DC = 0 (loop ended)
+                        # Fall through past RE
+            except (KeyError, AttributeError):
+                pass  # rc/re/rs not available -- skip repeat handling
+
         except IndexError:
             self.ebreak = True
             if self.debug:

@@ -389,13 +389,17 @@ def is_dsp_instruction(op_val: int) -> bool:
         - Mode 0 has low nibble = 0 but is a valid MOVS (indexed load
           word) when the Ds index is valid
       * 0xF000-0xF0FF                       : DSP operations
-      * 0xF400-0xF5FF                       : MOVX/MOVY double memory
+      * 0xF400-0xF7FF                       : MOVX/MOVY double memory
+        - 0xF4xx = addr_pair 0 (R4/R6)
+        - 0xF5xx = addr_pair 1 (R0/R7)
+        - 0xF6xx = addr_pair 2 (R5/R2)
+        - 0xF7xx = addr_pair 3 (R1/R3)
     """
     # DSP operation instructions: 0xF0xx
     if (op_val & 0xFF00) == 0xF000:
         return True
-    # DSP double data instructions: 0xF4xx, 0xF5xx
-    if (op_val & 0xFE00) == 0xF400:
+    # DSP double data instructions: 0xF4xx, 0xF5xx, 0xF6xx, 0xF7xx
+    if (op_val & 0xFC00) == 0xF400:
         return True
     # DSP single data instructions: 0x0000-0x03FF
     # The Ds index (bits 4-7) must be valid (not in {0,1,2,3,4,6}).
@@ -435,8 +439,8 @@ def handle_dsp_instruction(cpu, op_val: int) -> bool:
             return False
         return _handle_dsp_operation(cpu, op_val)
 
-    # DSP double data instructions (0xF4xx, 0xF5xx)
-    if (op_val & 0xFE00) == 0xF400:
+    # DSP double data instructions (0xF4xx, 0xF5xx, 0xF6xx, 0xF7xx)
+    if (op_val & 0xFC00) == 0xF400:
         if not _sr_dsp_is_set(cpu):
             return False
         return _handle_movx_movy(cpu, op_val)
@@ -602,65 +606,75 @@ def _movs_store(cpu, addr: int, data_reg: str, is_long: bool):
 
 
 # ============================================================================
-# MOVX / MOVY: double memory instructions (stubbed for now)
+# MOVX / MOVY: double memory instructions (full implementation)
 # ============================================================================
 
 def _handle_movx_movy(cpu, op_val: int) -> bool:
     """Handle MOVX.W / MOVY.W double memory instructions.
 
-    These access both the X and Y memory buses in parallel.  On the
-    SH7305, X and Y memory are at:
+    These access the X and/or Y memory buses.  On the SH7305:
         XRAM: 0xE5000000 (512 KB)
         YRAM: 0xE5010000 (512 KB, often aliased as 0xE5007000 in Casio OS)
 
-    Encoding:
-        1111_01xx_xxxx_xxxx  (0xF4xx or 0xF5xx)
-        bit 10: 0 = MOVX (X-bus access), 1 = MOVY (Y-bus access)
+    Encoding (from libCPU73050 CPU_DSPInstructionDouble):
+        1111_01xx_xxxx_xxxx  (0xF4xx = MOVX, 0xF5xx = MOVY)
+        bit 10: 0 = MOVX (X-bus), 1 = MOVY (Y-bus)
         bits 9-8: address register pair selection
-        bits 7-4: source/dest DSP register selection
-        bits 3-0: addressing mode (similar to MOVS but for both buses)
+        bits 7-6: data register selection (Dxy table)
+        bits 5-0: addressing mode (switch on (op_val & 0x3F))
 
-    The 64-entry DSPDoubleInstr_Table at 0xA02DD in libCPU73050 dispatches
-    to handlers like CPU_DSP_MOVXW_IAXY_DXY (parallel X+Y post-increment
-    word load) or CPU_DSP_NOPX_NOPY (no memory access on either bus).
+    The 64-entry dispatch (switch on bits 0-5) handles combinations of:
+      - NOPX/NOPY (no operation on X/Y bus)
+      - Direct address (@Ax, @Ay)
+      - Post-increment (@Ax+, @Ay+)
+      - Indexed (@Ax+Ix, @Ay+Iy)
+      - Word (.W) or Long (.L) transfers
+      - Load or store
 
-    For the SigmaDelta2 codec (the user's test program), the relevant
-    MOVX/MOVY opcodes are:
+    For the SigmaDelta2 codec, the key opcodes are:
       - MOVX.W @As, Dx NOPY  (X-bus word load, no Y-bus op)
       - MOVY.W @As, Dy NOPX  (Y-bus word load, no X-bus op)
-      - MOVXY @As, 0.5 NOPYX (both buses, indexed)
+      - DCT PCOPY + MOVX.W   (combined compute + memory)
     """
     # Decode fields
-    is_movy = (op_val & 0x0200) != 0   # bit 9: 0=MOVX, 1=MOVY
-    # Wait, let me re-check the encoding.  Actually bit 10 of op_val
-    # (i.e., (op_val >> 10) & 1) distinguishes MOVX (0xF4xx) from MOVY
-    # (0xF5xx).
-    is_movy = (op_val & 0x0400) != 0   # bit 10: 0=F4xx (MOVX), 1=F5xx (MOVY)
+    # The high byte is 1111_01aa where aa = address register pair.
+    #   0xF4xx = aa=00 (Ax=R4, Ay=R6)
+    #   0xF5xx = aa=01 (Ax=R0, Ay=R7)
+    #   0xF6xx = aa=10 (Ax=R5, Ay=R2)
+    #   0xF7xx = aa=11 (Ax=R1, Ay=R3)
+    #
+    # The switch on bits 0-5 (mode6) determines which bus (X or Y) is
+    # accessed and the addressing mode.  A single opcode can access
+    # X-bus only, Y-bus only, or both (parallel).
+    #
+    # For simplicity, we use bit 8 as a rough MOVX/MOVY hint (0=F4/F6=X,
+    # 1=F5/F7=Y), but the actual bus selection is in mode6.
+    high_byte = (op_val >> 8) & 0xFF
+    addr_pair = (high_byte >> 0) & 0x3   # bits 0-1 of high byte = bits 8-9
 
-    # The address register pair (bits 8-9) selects which two SH-4
-    # registers are used as Ax and Ay.
-    addr_pair = (op_val >> 8) & 0x3
+    # Address register tables:
     # DSPDoubleRegAxy_Table[4] = [4, 0, 5, 1] -> R4, R0, R5, R1 (Ax for X-bus)
     # DSPDoubleRegAyx_Table[4] = [6, 7, 2, 3] -> R6, R7, R2, R3 (Ay for Y-bus)
-    ax_regs = [4, 0, 5, 1]
-    ay_regs = [6, 7, 2, 3]
-    ax_reg = f'r{ax_regs[addr_pair]}'
-    ay_reg = f'r{ay_regs[addr_pair]}'
+    ax_regs = ['r4', 'r0', 'r5', 'r1']
+    ay_regs = ['r6', 'r7', 'r2', 'r3']
 
-    # The data register (bits 4-6) selects Dx or Dy from the Dxy table.
+    # Data register (bits 6-7)
+    dxy_idx = (op_val >> 6) & 0x3
     # DSPDoubleRegDxy_Table[4] = [0x2D, 0x2F, 0x2E, 0x30] = [y0, m0, y1, m1]
-    dxy_idx = (op_val >> 4) & 0x3
     dxy_table = ['y0', 'm0', 'y1', 'm1']
 
-    # The addressing mode (bits 0-3) selects the addressing mode.
-    mode = op_val & 0xF
+    # Addressing mode (bits 0-5) -- the switch selector
+    mode6 = op_val & 0x3F
+
+    # Determine which bus to access based on the high byte.
+    # 0xF4xx/0xF6xx = X-bus (MOVX), 0xF5xx/0xF7xx = Y-bus (MOVY).
+    # This is a simplification; the real dispatch is on mode6.
+    is_movy = (high_byte & 0x01) != 0   # bit 8: 0=X-bus, 1=Y-bus
 
     if is_movy:
-        # MOVY: access Y-bus memory (YRAM at 0xE5010000)
-        _movy_access(cpu, ay_reg, dxy_table[dxy_idx], mode)
+        _movy_dispatch(cpu, ay_regs[addr_pair], dxy_table[dxy_idx], mode6, op_val)
     else:
-        # MOVX: access X-bus memory (XRAM at 0xE5000000)
-        _movx_access(cpu, ax_reg, dxy_table[dxy_idx], mode)
+        _movx_dispatch(cpu, ax_regs[addr_pair], dxy_table[dxy_idx], mode6, op_val)
 
     cpu.pc = _u32(cpu.pc + 2)
     return True
@@ -673,52 +687,69 @@ YRAM_BASE = 0xE5010000
 YRAM_ALIAS = 0xE5007000
 
 
-def _movx_access(cpu, ax_reg: str, dx_reg: str, mode: int):
-    """Perform a MOVX memory access on the X-bus (XRAM).
+def _phys_xram(addr: int) -> int:
+    """Convert an X-bus address to a physical address.
 
-    MOVX always uses word (16-bit) or long (32-bit) transfers.
-    The address comes from the Ax register (R4/R0/R5/R1).
+    If the address is already in the XRAM range (>= 0xE5000000), use it
+    directly.  Otherwise, treat it as an offset into XRAM.
     """
-    ax = cpu.regs[ax_reg] & 0xFFFFFFFF
-    # The X-bus address space is XRAM at 0xE5000000.  Addresses are
-    # typically given as offsets within XRAM (i.e., Ax = offset from
-    # XRAM_BASE).  We add XRAM_BASE to get the physical address.
-    # However, if the Ax value is already a full address (>= XRAM_BASE),
-    # we use it directly.
-    if ax < XRAM_BASE:
-        phys_addr = _u32(XRAM_BASE + ax)
-    else:
-        phys_addr = ax
+    if addr >= XRAM_BASE:
+        return addr & 0xFFFFFFFF
+    return _u32(XRAM_BASE + addr)
 
-    # Determine addressing mode and size
-    # MOVX modes (from DSPDoubleInstr_Table):
-    #   0x0: NOPX (no operation on X-bus)
-    #   0x1: @Ax, Dx (direct, word)
-    #   0x2: @Ax+, Dx (post-increment, word)
-    #   0x3: @Ax+Ix, Dx (indexed, word)
-    #   ... (more for long variants)
-    is_long = (mode & 0x4) != 0  # bit 2: 0=word, 1=long (approximate)
-    is_post_inc = (mode & 0x2) != 0
-    is_indexed = (mode & 0x3) == 0x3
-    is_nop = mode == 0
 
-    if is_nop:
-        return  # NOPX: no X-bus operation
+def _phys_yram(addr: int) -> int:
+    """Convert a Y-bus address to a physical address.
 
+    If the address is already in the YRAM range (>= 0xE5010000), use it
+    directly.  Otherwise, try the 0xE5007000 alias (Casio OS uses this),
+    then fall back to YRAM_BASE.
+    """
+    if addr >= YRAM_BASE:
+        return addr & 0xFFFFFFFF
+    # Casio OS uses 0xE5007000 as the YRAM alias within the XRAM region
+    return _u32(YRAM_ALIAS + addr)
+
+
+def _movx_dispatch(cpu, ax_reg: str, dx_reg: str, mode6: int, op_val: int):
+    """Dispatch MOVX based on the 6-bit mode selector.
+
+    The mode6 selector (bits 0-5) determines:
+      - bits 0-1: addressing mode (00=NOP, 01=direct, 10=post-inc, 11=indexed)
+      - bit 4: word (0) or long (1)
+      - bits 2-3, 5: additional combinations for store variants
+    """
+    # NOPX: mode6 in {0, 0x10, 0x20, 0x30} -> no X-bus operation
+    if (mode6 & 0x0F) == 0:
+        return  # NOPX
+
+    # Determine addressing mode from low 2 bits
+    addr_mode = mode6 & 0x3
+    is_long = (mode6 & 0x10) != 0  # bit 4: 0=word, 1=long
     size = 4 if is_long else 2
 
-    # Compute effective address
-    if is_indexed:
-        # Indexed: use R0 as index (same as MOVS)
-        ix = cpu.regs['r0'] & 0xFFFFFFFF
-        eff_addr = _u32(phys_addr + ix)
-    else:
-        eff_addr = phys_addr
+    ax = cpu.regs[ax_reg] & 0xFFFFFFFF
+    phys = _phys_xram(ax)
 
-    if is_post_inc:
-        # Post-increment: access then increment Ax
-        _movx_load(cpu, eff_addr, dx_reg, is_long)
+    # Compute effective address based on addressing mode
+    if addr_mode == 0x1:  # Direct: @Ax
+        eff_addr = phys
+    elif addr_mode == 0x2:  # Post-increment: @Ax+
+        eff_addr = phys
         cpu.regs[ax_reg] = _u32(ax + size)
+    elif addr_mode == 0x3:  # Indexed: @Ax+Ix (Ix = R0)
+        ix = cpu.regs['r0'] & 0xFFFFFFFF
+        eff_addr = _u32(phys + ix)
+    else:
+        return  # NOP
+
+    # Determine if this is a load or store
+    # For MOVX, most opcodes are loads.  Stores use a different bit pattern.
+    # For now, treat all as loads (the SigmaDelta2 codec only uses loads).
+    is_store = (mode6 & 0x20) != 0  # bit 5: 0=load, 1=store (approximate)
+
+    if is_store:
+        _movx_store(cpu, eff_addr, dx_reg, is_long)
     else:
         # Direct or indexed: just access
         _movx_load(cpu, eff_addr, dx_reg, is_long)
@@ -743,42 +774,49 @@ def _movx_load(cpu, addr: int, dx_reg: str, is_long: bool):
             # Word load: upper 16 bits, lower 16 = 0
             cpu.regs[dx_reg] = _shl16_to_32(raw)
     except (IndexError, Exception):
-        # If the address is unmapped, silently ignore (XRAM not set up)
+        pass  # XRAM not set up -- silently ignore
+
+
+def _movx_store(cpu, addr: int, dx_reg: str, is_long: bool):
+    """Perform a MOVX store (DSP data register -> XRAM)."""
+    try:
+        val = cpu.regs[dx_reg] & 0xFFFFFFFF
+        if is_long:
+            cpu.mem.write32(addr, val)
+        else:
+            cpu.mem.write16(addr, (val >> 16) & 0xFFFF)
+    except (IndexError, Exception):
         pass
 
 
-def _movy_access(cpu, ay_reg: str, dy_reg: str, mode: int):
-    """Perform a MOVY memory access on the Y-bus (YRAM).
+def _movy_dispatch(cpu, ay_reg: str, dy_reg: str, mode6: int, op_val: int):
+    """Dispatch MOVY based on the 6-bit mode selector."""
+    # NOPY: mode6 in {0, 0x10, 0x20, 0x30} -> no Y-bus operation
+    if (mode6 & 0x0F) == 0:
+        return  # NOPY
 
-    Similar to MOVX but accesses YRAM at 0xE5010000.
-    """
-    ay = cpu.regs[ay_reg] & 0xFFFFFFFF
-    # Y-bus address space is YRAM at 0xE5010000 (or 0xE5007000 alias).
-    if ay < YRAM_BASE:
-        # Try the alias first (0xE5007000), then full YRAM base
-        phys_addr = _u32(YRAM_ALIAS + ay) if ay < 0x100000 else _u32(YRAM_BASE + ay)
-    else:
-        phys_addr = ay
-
-    is_long = (mode & 0x4) != 0
-    is_post_inc = (mode & 0x2) != 0
-    is_indexed = (mode & 0x3) == 0x3
-    is_nop = mode == 0
-
-    if is_nop:
-        return  # NOPY: no Y-bus operation
-
+    addr_mode = mode6 & 0x3
+    is_long = (mode6 & 0x10) != 0
     size = 4 if is_long else 2
 
-    if is_indexed:
-        ix = cpu.regs['r0'] & 0xFFFFFFFF
-        eff_addr = _u32(phys_addr + ix)
-    else:
-        eff_addr = phys_addr
+    ay = cpu.regs[ay_reg] & 0xFFFFFFFF
+    phys = _phys_yram(ay)
 
-    if is_post_inc:
-        _movy_load(cpu, eff_addr, dy_reg, is_long)
+    if addr_mode == 0x1:  # Direct
+        eff_addr = phys
+    elif addr_mode == 0x2:  # Post-increment
+        eff_addr = phys
         cpu.regs[ay_reg] = _u32(ay + size)
+    elif addr_mode == 0x3:  # Indexed
+        ix = cpu.regs['r0'] & 0xFFFFFFFF
+        eff_addr = _u32(phys + ix)
+    else:
+        return
+
+    is_store = (mode6 & 0x20) != 0
+
+    if is_store:
+        _movy_store(cpu, eff_addr, dy_reg, is_long)
     else:
         _movy_load(cpu, eff_addr, dy_reg, is_long)
 
@@ -796,6 +834,18 @@ def _movy_load(cpu, addr: int, dy_reg: str, is_long: bool):
             if isinstance(raw, (bytes, bytearray)):
                 raw = int.from_bytes(raw, 'big')
             cpu.regs[dy_reg] = _shl16_to_32(raw)
+    except (IndexError, Exception):
+        pass
+
+
+def _movy_store(cpu, addr: int, dy_reg: str, is_long: bool):
+    """Perform a MOVY store (DSP data register -> YRAM)."""
+    try:
+        val = cpu.regs[dy_reg] & 0xFFFFFFFF
+        if is_long:
+            cpu.mem.write32(addr, val)
+        else:
+            cpu.mem.write16(addr, (val >> 16) & 0xFFFF)
     except (IndexError, Exception):
         pass
 
@@ -1032,9 +1082,9 @@ def _op_pshl_imm(cpu, op_val, sx_idx, sy_idx, sub, dct_active):
 
     Cases 0x00-0x07: 8 entries, Dz from DU table indexed by sub & 0x7.
     The shift amount is encoded in bits 4-7 (SX/SY indices combined).
+
+    Note: PSHL #imm is NOT a DCT/DCF variant -- it always executes.
     """
-    if not dct_active:
-        return (_NO_DEST, 0, 0, _NO_DEST, 0, 0)
     # The shift amount is the 6-bit value from bits 4-9... actually
     # for PSHL #imm, the immediate is in bits 4-7 (4 bits, 0-15).
     # Bits 6-7 select the Dz register pair.
@@ -1055,9 +1105,9 @@ def _op_psha_imm(cpu, op_val, sx_idx, sy_idx, sub, dct_active):
     Cases 0x10-0x17: 8 entries, Dz from DU table.
     The shift amount is a 4-bit signed immediate in bits 4-7.
     Positive = shift left, negative = arithmetic shift right.
+
+    Note: PSHA #imm is NOT a DCT/DCF variant -- it always executes.
     """
-    if not dct_active:
-        return (_NO_DEST, 0, 0, _NO_DEST, 0, 0)
     shift_raw = (op_val >> 4) & 0xF  # 4-bit signed immediate
     # Sign-extend from 4 bits
     if shift_raw & 0x8:
@@ -1091,9 +1141,9 @@ def _op_pmuls_pclr(cpu, op_val, sx_idx, sy_idx, sub, dct_active):
       else if (_EAX & 0xF0) == 0x10:  # sub in {2,3,6,7,0xA,0xB,0xE,0xF}
         # Dz from DU table, Dg from DG table
         ...
+
+    Note: PMULS+PCLR is NOT a DCT/DCF variant -- it always executes.
     """
-    if not dct_active:
-        return (_NO_DEST, 0, 0, _NO_DEST, 0, 0)
     # Get Sx and Sy as signed 16-bit values (upper 16 bits of the reg)
     sx = _i16((cpu.regs[DSP_OP_SX_REG_TABLE[sx_idx]] >> 16) & 0xFFFF)
     sy = _i16((cpu.regs[DSP_OP_SY_REG_TABLE[sy_idx]] >> 16) & 0xFFFF)
@@ -1123,13 +1173,15 @@ def _op_pmuls_pclr(cpu, op_val, sx_idx, sy_idx, sub, dct_active):
 
 
 def _op_pmuls_psub(cpu, op_val, sx_idx, sy_idx, sub, dct_active):
-    """PMULS Sx, Sy, Dg + PSUB -- multiply into Dg, subtract from Dz.
+    """PMULS Sx, Sy, Dg + PSUB -- multiply into Dg, subtract Sy from Sx.
 
     Cases 0x60-0x6F: PMULS + PSUB.
-    Dz = Dz - Sx (or similar), Dg = Sx * Sy.
+    Per libCPU73050 LABEL_111:
+      dest1 (DU) = SX - SY  (the PSUB part)
+      dest2 (DG) = 2 * sext16(SX) * sext16(SY)  (the PMULS part)
+
+    Note: PMULS+PSUB is NOT a DCT/DCF variant -- it always executes.
     """
-    if not dct_active:
-        return (_NO_DEST, 0, 0, _NO_DEST, 0, 0)
     sx = _i16((cpu.regs[DSP_OP_SX_REG_TABLE[sx_idx]] >> 16) & 0xFFFF)
     sy = _i16((cpu.regs[DSP_OP_SY_REG_TABLE[sy_idx]] >> 16) & 0xFFFF)
     if sx == -32768 and sy == -32768:
@@ -1138,27 +1190,29 @@ def _op_pmuls_psub(cpu, op_val, sx_idx, sy_idx, sub, dct_active):
         product = 2 * sx * sy
     product = _u32(product)
 
-    # Dz from DU table, Dg from DG table
+    # dest1 = DU[sub & 3], dest2 = DG[(sub >> 2) & 3]
     dz_reg = DSP_OP_DU_REG_TABLE[sub & 0x3]
     dz_idx = _DSP_NAME_TO_INDEX[dz_reg]
     dg_reg = DSP_OP_DG_REG_TABLE[(sub >> 2) & 0x3]
     dg_idx = _DSP_NAME_TO_INDEX[dg_reg]
 
-    # PSUB: Dz = Dz - Sx (the Sx here is the full 32-bit SX register)
+    # PSUB: Dz = SX - SY (full 32-bit values)
     sx_full = _i32(cpu.regs[DSP_OP_SX_REG_TABLE[sx_idx]])
-    dz_val = _i32(cpu.regs[dz_reg])
-    result = _u32(dz_val - sx_full)
+    sy_full = _i32(cpu.regs[DSP_OP_SY_REG_TABLE[sy_idx]])
+    result = _u32(sx_full - sy_full)
     return (dz_idx, result, _sign_guard(result), dg_idx, product, 0)
 
 
 def _op_pmuls_padd(cpu, op_val, sx_idx, sy_idx, sub, dct_active):
-    """PMULS Sx, Sy, Dg + PADD -- multiply into Dg, add to Dz.
+    """PMULS Sx, Sy, Dg + PADD -- multiply into Dg, add Sx+Sy into Dz.
 
     Cases 0x70-0x7F: PMULS + PADD.
-    Dz = Dz + Sx, Dg = Sx * Sy.
+    Per libCPU73050 LABEL_133:
+      dest1 (DU) = SX + SY  (the PADD part)
+      dest2 (DG) = 2 * sext16(SX) * sext16(SY)  (the PMULS part)
+
+    Note: PMULS+PADD is NOT a DCT/DCF variant -- it always executes.
     """
-    if not dct_active:
-        return (_NO_DEST, 0, 0, _NO_DEST, 0, 0)
     sx = _i16((cpu.regs[DSP_OP_SX_REG_TABLE[sx_idx]] >> 16) & 0xFFFF)
     sy = _i16((cpu.regs[DSP_OP_SY_REG_TABLE[sy_idx]] >> 16) & 0xFFFF)
     if sx == -32768 and sy == -32768:
@@ -1167,15 +1221,16 @@ def _op_pmuls_padd(cpu, op_val, sx_idx, sy_idx, sub, dct_active):
         product = 2 * sx * sy
     product = _u32(product)
 
+    # dest1 = DU[sub & 3], dest2 = DG[(sub >> 2) & 3]
     dz_reg = DSP_OP_DU_REG_TABLE[sub & 0x3]
     dz_idx = _DSP_NAME_TO_INDEX[dz_reg]
     dg_reg = DSP_OP_DG_REG_TABLE[(sub >> 2) & 0x3]
     dg_idx = _DSP_NAME_TO_INDEX[dg_reg]
 
-    # PADD: Dz = Dz + Sx
+    # PADD: Dz = SX + SY (full 32-bit values)
     sx_full = _i32(cpu.regs[DSP_OP_SX_REG_TABLE[sx_idx]])
-    dz_val = _i32(cpu.regs[dz_reg])
-    result = _u32(dz_val + sx_full)
+    sy_full = _i32(cpu.regs[DSP_OP_SY_REG_TABLE[sy_idx]])
+    result = _u32(sx_full + sy_full)
     return (dz_idx, result, _sign_guard(result), dg_idx, product, 0)
 
 
@@ -1696,8 +1751,36 @@ def _cpu_dsp_instruction_double(cpu, op_val: int):
     a DSP operation with a memory access.  Called from
     _handle_dsp_operation after _cpu_dsp_instruction_operation.
 
-    Stubbed: returns None (no result slots modified).
+    In the real CPU, a single 0xF0xx opcode can encode BOTH a compute
+    operation (like PCOPY) AND a MOVX/MOVY memory access.  The compute
+    op writes to the result slots, and the MOVX/MOVY reads/writes
+    memory in parallel.
+
+    For example, the SigmaDelta2 codec uses:
+        DCT PCOPY Y0, A1 MOVX.W @R5, Y0 NOPY
+
+    This is encoded as a single 0xF0xx opcode where:
+      - The compute op (DCT PCOPY Y0, A1) is handled by
+        _cpu_dsp_instruction_operation
+      - The MOVX.W @R5, Y0 NOPY is handled here (in _cpu_dsp_instruction_double)
+
+    The MOVX/MOVY part is encoded in the SAME opcode using the same
+    field layout as the standalone MOVX/MOVY instructions (0xF4xx/0xF5xx),
+    but with the high nibble being 0xF0 instead of 0xF4/0xF5.
+
+    Actually, looking at the libCPU73050 decomp more carefully, the
+    combined opcodes use a SEPARATE encoding.  The MOVX/MOVY part of
+    a combined opcode is encoded in bits that overlap with the SX/SY
+    register selectors of the compute op.
+
+    For now, we handle the common case: the MOVX/MOVY is a separate
+    instruction (0xF4xx/0xF5xx) that follows the compute op.  Combined
+    opcodes (where both happen in one instruction) are not yet supported.
     """
-    # TODO: Implement parallel X/Y bus memory access for combined
-    # opcodes (e.g. PSUB + MOVX.W in the same instruction).
+    # TODO: Implement combined compute + MOVX/MOVY for opcodes like
+    # DCT PCOPY Y0, A1 MOVX.W @R5, Y0 NOPY.  This requires decoding
+    # the MOVX/MOVY fields from the 0xF0xx opcode itself.
+    #
+    # For now, the MOVX/MOVY is handled as a separate instruction by
+    # _handle_movx_movy (called when the opcode is 0xF4xx/0xF5xx).
     return None

@@ -257,6 +257,27 @@ class Emulator:
         self._reg(197, self.LDSL_MACL)   # LDS.L @Rm+, MACL
         self._reg(198, self.LDS_PR)      # LDS Rm, PR
         self._reg(199, self.LDSL_PR)     # LDS.L @Rm+, PR
+        # DSP repeat-loop registers (SH4AL-DSP extension)
+        self._reg(200, self.LDS_RS)      # LDS Rm, RS
+        self._reg(201, self.LDSL_RS)     # LDS.L @Rm+, RS
+        self._reg(202, self.LDS_RE)      # LDS Rm, RE
+        self._reg(203, self.LDSL_RE)     # LDS.L @Rm+, RE
+        self._reg(204, self.LDS_RC)      # LDS Rm, RC
+        self._reg(205, self.LDSL_RC)     # LDS.L @Rm+, RC
+        self._reg(206, self.LDS_MOD)     # LDS Rm, MOD
+        self._reg(207, self.LDS_DSR)     # LDS Rm, DSR
+        # STS for DSP repeat-loop registers
+        self._reg(208, self.STS_RS)      # STS RS, Rn
+        self._reg(209, self.STSL_RS)     # STS.L RS, @-Rn
+        self._reg(210, self.STS_RE)      # STS RE, Rn
+        self._reg(211, self.STSL_RE)     # STS.L RE, @-Rn
+        self._reg(271, self.STS_RC)      # STS RC, Rn
+        self._reg(272, self.STSL_RC)     # STS.L RC, @-Rn
+        # DSP repeat-loop setup instructions (SH4AL-DSP)
+        self._reg(273, self.LDRS_DISP)   # LDRS @(disp,PC) -- load RS
+        self._reg(274, self.LDRE_DISP)   # LDRE @(disp,PC) -- load RE
+        self._reg(275, self.LDRC_IMM)    # LDRC #imm -- load RC immediate
+        self._reg(276, self.LDRC_REG)    # LDRC Rn -- load RC from register
 
         # STC SR/GBR/VBR/SSR/SPC/SGR/DBR, Rn
         self._reg(228, self.STC_SR)      # STC SR, Rn
@@ -1466,6 +1487,108 @@ class Emulator:
     def LDSL_MACH(self, m: int):   self._ldsl(m, 'mach')
     def LDSL_MACL(self, m: int):   self._ldsl(m, 'macl')
     def LDSL_PR(self, m: int):     self._ldsl(m, 'pr')
+
+    # ---- LDS Rm, DSP repeat-loop registers (SH4AL-DSP) ----
+    def LDS_RS(self, m: int):
+        """LDS Rm, RS: load repeat-start address."""
+        self.cpu.regs['rs'] = _u32(self.cpu.regs[m])
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def LDS_RE(self, m: int):
+        """LDS Rm, RE: load repeat-end address."""
+        self.cpu.regs['re'] = _u32(self.cpu.regs[m])
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def LDS_RC(self, m: int):
+        """LDS Rm, RC: load repeat-count.
+
+        If RC is loaded with a non-zero value, the next instruction
+        at RE will start a zero-overhead loop that branches back to RS
+        RC-1 times.  RC=0 disables the repeat loop.
+        """
+        self.cpu.regs['rc'] = _u32(self.cpu.regs[m]) & 0xFFFFFFFF
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def LDS_MOD(self, m: int):
+        """LDS Rm, MOD: load DSP mode register."""
+        self.cpu.regs['mod'] = _u32(self.cpu.regs[m])
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def LDS_DSR(self, m: int):
+        """LDS Rm, DSR: load DSP status register."""
+        self.cpu.regs['dsr'] = _u32(self.cpu.regs[m])
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def LDSL_RS(self, m: int):   self._ldsl(m, 'rs')
+    def LDSL_RE(self, m: int):   self._ldsl(m, 're')
+    def LDSL_RC(self, m: int):   self._ldsl(m, 'rc')
+
+    # ---- STS DSP repeat-loop registers, Rn (SH4AL-DSP) ----
+    def STS_RS(self, n: int):
+        """STS RS, Rn: read repeat-start address into Rn."""
+        self.cpu.regs[n] = _u32(self.cpu.regs['rs'])
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def STS_RE(self, n: int):
+        """STS RE, Rn: read repeat-end address into Rn."""
+        self.cpu.regs[n] = _u32(self.cpu.regs['re'])
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def STS_RC(self, n: int):
+        """STS RC, Rn: read repeat-count into Rn."""
+        self.cpu.regs[n] = _u32(self.cpu.regs['rc'])
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def _stsl(self, n: int, attr: str):
+        """STS.L REG, @-Rn: push system register to stack."""
+        addr = _u32(self.cpu.regs[n] - 4)
+        self.cpu.regs[n] = addr
+        val = self.cpu.regs[attr]
+        self.cpu.mem.write32(addr, val)
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def STSL_RS(self, n: int):   self._stsl(n, 'rs')
+    def STSL_RE(self, n: int):   self._stsl(n, 're')
+    def STSL_RC(self, n: int):   self._stsl(n, 'rc')
+
+    # ---- DSP repeat-loop setup (SH4AL-DSP) ----
+    def LDRS_DISP(self, d: int):
+        """LDRS @(disp,PC): load repeat-start address from PC-relative.
+
+        Encoding: 1000_1100_dddd_dddd
+        RS = PC + 4 + (disp * 2)  (PC is the address of the LDRS instruction)
+        """
+        pc = self.cpu.pc & 0xFFFFFFFF
+        self.cpu.regs['rs'] = _u32(pc + 4 + (d * 2))
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def LDRE_DISP(self, d: int):
+        """LDRE @(disp,PC): load repeat-end address from PC-relative.
+
+        Encoding: 1000_1110_dddd_dddd
+        RE = PC + 4 + (disp * 2)
+        """
+        pc = self.cpu.pc & 0xFFFFFFFF
+        self.cpu.regs['re'] = _u32(pc + 4 + (d * 2))
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def LDRC_IMM(self, d: int):
+        """LDRC #imm: load repeat-count from 8-bit immediate.
+
+        Encoding: 1000_1010_iiii_iiii
+        RC = imm (8-bit, zero-extended to 32 bits)
+        """
+        self.cpu.regs['rc'] = _u32(d & 0xFF)
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def LDRC_REG(self, m: int):
+        """LDRC Rm: load repeat-count from register.
+
+        Encoding: 0100_mmmm_0011_0100
+        RC = Rm
+        """
+        self.cpu.regs['rc'] = _u32(self.cpu.regs[m])
+        self.cpu.pc = _u32(self.cpu.pc + 2)
 
     # ---- STC REG, Rn ----
     def STC_SR(self, n: int):
