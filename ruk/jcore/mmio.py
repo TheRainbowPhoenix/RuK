@@ -152,3 +152,22 @@ def attach_dma(memory_map: MemoryMap, dma) -> None:
     memory_map.add(DMA_BASE, dma_dev, name="DMA", perms="RW")
     # Give the DMA controller access to the memory map so it can perform transfers
     dma.set_memory(memory_map)
+
+
+def attach_display(memory_map: MemoryMap, display) -> None:
+    """
+    Map an R61523 LCD display into a RuK MemoryMap.
+
+    Two regions:
+      - PRDR at 0xA405013C (8-bit, Port R data register)
+      - Display interface at 0xB4000000 (16-bit, register/pixel data)
+    """
+    from ruk.jcore.display import PRDR_ADDR
+
+    # PRDR (1 byte at 0xA405013C)
+    prdr_dev = MMIODevice(PRDR_ADDR, 1, display, name="PRDR")
+    memory_map.add(PRDR_ADDR, prdr_dev, name="PRDR", perms="RW")
+
+    # Display interface (4 bytes at 0xB4000000, enough for 16/32-bit access)
+    disp_dev = MMIODevice(0xB4000000, 4, display, name="Display")
+    memory_map.add(0xB4000000, disp_dev, name="Display", perms="RW")

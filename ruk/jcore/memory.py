@@ -133,17 +133,25 @@ class MemoryMap:
 
     def resolve(self, address: Union[int, bytearray]) -> Tuple[Memory, int]:
         """
-        Browse the memory map for the address.
-        :param address:
-        :return: Memory
+        Browse the memory map for the address.  If multiple regions
+        contain the address, prefer the smallest (most specific) region.
+        This lets MMIO peripherals (small, e.g. 0x30 bytes for TMU)
+        take priority over catch-all regions (large, e.g. 16MB).
         """
         if type(address) == bytearray:
             address = int.from_bytes(address, "big")
 
+        best = None
+        best_size = float('inf')
         for start in self._mem:
             mem = self._mem[start]
-            if start <= address <= start + len(mem):
-                return mem, start
+            mem_len = len(mem)
+            if start <= address <= start + mem_len:
+                if mem_len < best_size:
+                    best = (mem, start)
+                    best_size = mem_len
+        if best is not None:
+            return best
         # no memory mapped
         raise IndexError(f'Address is unmapped : {hex(address)}')
 
@@ -253,5 +261,7 @@ class MemoryMap:
             else:
                 perms, name = ("RWX", "???")
             end = start + len(memory)
-            mapped_areas.append((start, end, name, perms))  # TODO: name + perms !
+            mapped_areas.append((start, end, name, perms))
+        # Sort by start address so the display is ordered
+        mapped_areas.sort(key=lambda x: x[0])
         return mapped_areas

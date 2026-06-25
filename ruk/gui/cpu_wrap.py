@@ -158,6 +158,9 @@ class RegisterFrame(BaseFrame):
 
         i = 0
         for reg in self._regs:
+            if "bank" in reg:
+                continue # skip bank in display
+
             self._create_register(reg, i)
             i += 1
 
@@ -196,13 +199,27 @@ class RegisterFrame(BaseFrame):
                              )
 
         memory_map = ttk.Button(widget,
-                             text="Memory Map",
+                             text="Map",
                              style="Secondary.TButton",
-                             width=24,
+                             width=4,
+                             )
+        
+        memory_view = ttk.Button(widget,
+                             text="Mem",
+                             style="Secondary.TButton",
+                             width=4,
+                             )
+        
+        screen_view = ttk.Button(widget,
+                             text="LCD",
+                             style="Secondary.TButton",
+                             width=4,
                              )
 
         memory_map.grid(row=0, column=0, padx=5, pady=5, sticky=tk.SE)
-        refresh.grid(row=0, column=1, padx=5, pady=5, sticky=tk.SE)
+        memory_view.grid(row=0, column=1, padx=5, pady=5, sticky=tk.SE)
+        screen_view.grid(row=0, column=2, padx=5, pady=5, sticky=tk.SE)
+        refresh.grid(row=0, column=3, padx=5, pady=5, sticky=tk.SE)
 
         # refresh.pack(fill=tk.Y, expand=0, anchor=tk.SE)
         # memory_map.pack(fill=tk.Y, expand=0, anchor=tk.SW)

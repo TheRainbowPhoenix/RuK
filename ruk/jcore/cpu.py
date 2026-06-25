@@ -39,12 +39,24 @@ class Register:
             'r13': 0x0,
             'r14': 0x0,
             'r15': 0x0,
+            'r0_bank': 0x0,
+            'r1_bank': 0x0,
+            'r2_bank': 0x0,
+            'r3_bank': 0x0,
+            'r4_bank': 0x0,
+            'r5_bank': 0x0,
+            'r6_bank': 0x0,
+            'r7_bank': 0x0,
             'pr': 0x0,
             'sr': 0x0,
             'gbr': 0x0,
             'vbr': 0x0,
             'mach': 0x0,
             'macl': 0x0,
+            'spc': 0x0,
+            'ssr': 0x0,
+            'sgr': 0x0,
+            'dbr': 0x0,
         }
 
     def __getitem__(self, key: Union[int, str]) -> int:
@@ -172,10 +184,10 @@ class CPU:
         self.intevt = 0       # interrupt event code
         self.tea = 0          # TLB exception address
 
-        # Banked registers (R0_BANK..R7_BANK) -- swapped in when SR.RB=1.
-        # We model them as a separate array; the swap happens whenever
-        # SR.RB is written.  See cp-emu/src/interpreter.c lines 151-158.
-        self.r_bank = [0] * 8
+        # Banked registers (R0_BANK..R7_BANK) -- stored in the Register
+        # dict as 'r0_bank'..'r7_bank'.  The r_bank property below is a
+        # convenience alias for backwards compatibility.
+        # (The swap happens when SR.RB is written -- see interpreter.c.)
 
         # Sleep state for the SLEEP instruction (cleared by any interrupt).
         self.is_sleeping = False
@@ -195,6 +207,16 @@ class CPU:
     @property
     def reg_pc(self):
         return self._pc_wrap
+
+    @property
+    def r_bank(self):
+        """Convenience list accessor for R0_BANK..R7_BANK."""
+        return [self.regs[f'r{i}_bank'] for i in range(8)]
+
+    @r_bank.setter
+    def r_bank(self, values):
+        for i, v in enumerate(values):
+            self.regs[f'r{i}_bank'] = v & 0xFFFFFFFF
 
     def _sr_t(self) -> int:
         """Get the T bit (bit 0 of SR)."""

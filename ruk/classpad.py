@@ -5,7 +5,7 @@ from ruk.jcore.memory import Memory, MemoryMap
 class Classpad:
     def __init__(self, rom: bytes, debug: bool = False, start_pc=None, ram_size: int = 0x100_0000,
                  with_tmu: bool = False, with_rtc: bool = False, with_ubc: bool = False,
-                 with_dma: bool = False):
+                 with_dma: bool = False, with_display: bool = False):
         """
         Create a virtual Classpad II.
 
@@ -17,6 +17,7 @@ class Classpad:
         :param with_ubc: If True, attach a UBC (User Break Controller)
                          for hardware breakpoints.
         :param with_dma: If True, attach a DMA controller (6 channels).
+        :param with_display: If True, attach an R61523 LCD display.
         """
         # TODO: get real values !!
         self._ram = Memory(ram_size)
@@ -41,13 +42,14 @@ class Classpad:
         self._cpu.regs[15] = 0x8C080000     # stack pointer (top of 8MB RAM)
         self._cpu.regs['pr'] = 0xFFFFFFFF   # return address (invalid -- catches missing RTS)
         self._cpu.regs['vbr'] = 0x80020F00  # vector base register (OS exception table)
-        self._cpu.regs['sr'] = 0x400000F0   # MD=1 (privileged), IMASK=0xF (all IRQs masked initially)
+        self._cpu.regs['sr'] = 0x700000F0   # MD=1, RB=1, BL=1 (privileged, banked, exceptions blocked); IMASK=0xF
 
         # Optional peripherals
         self._tmu = None
         self._rtc = None
         self._ubc = None
         self._dma = None
+        self._display = None
         self._intc = None
 
         if with_tmu:
@@ -58,6 +60,8 @@ class Classpad:
             self._setup_ubc()
         if with_dma:
             self._setup_dma()
+        if with_display:
+            self._setup_display()
 
     def _setup_tmu(self):
         """Attach the TMU+ETMU peripheral and an InterruptController."""
@@ -119,14 +123,71 @@ class Classpad:
         # Map the DMA MMIO region
         attach_dma(self._memory, self._dma)
 
+    def _setup_display(self):
+        """Attach the R61523 LCD display."""
+        from ruk.jcore.display import Display
+        from ruk.jcore.mmio import attach_display
+
+        self._display = Display()
+        attach_display(self._memory, self._display)
+
     def load_rom(self, rom: bytes):
         self._rom.write_bin(0, rom)
         self._cached_rom.write_bin(0, rom)
 
     def setup_memory(self):
+        # RAM (P1, uncached) and its P2 alias (cached)
         self._memory.add(0x8C00_0000, self._ram, name="RAM", perms="RWX")
+        self._memory.add(0xAC00_0000, self._ram, name="RAM (P2 cached)", perms="RWX")
+
+        # ROM (P1) and its P2 alias
         self._memory.add(0x8000_0000, self._rom, name="ROM", perms="RX")
         self._memory.add(0xA000_0000, self._cached_rom, name="Cached ROM", perms="RX")
+
+        # 64KB null page at address 0 (catches null pointer dereferences)
+        self._null_page = Memory(0x10000)
+        self._memory.add(0x00000000, self._null_page, name="Null page", perms="RW")
+
+        # ILRAM (4KB at 0xE5200000) -- instruction/data RAM
+        self._ilram = Memory(0x1000)
+        self._memory.add(0xE5200000, self._ilram, name="ILRAM", perms="RWX")
+
+        # XRAM (8KB at 0xE5000000) -- DSP X memory
+        self._xram = Memory(0x2000)
+        self._memory.add(0xE5000000, self._xram, name="XRAM", perms="RW")
+
+        # YRAM (8KB at 0xE5010000) -- DSP Y memory
+        self._yram = Memory(0x2000)
+        self._memory.add(0xE5010000, self._yram, name="YRAM", perms="RW")
+
+        # RS memory (16KB at 0xFD800000) -- storage memory
+        self._rs = Memory(0x4000)
+        self._memory.add(0xFD800000, self._rs, name="RS memory", perms="RW")
+
+        # PRAM0 (160KB at 0xFE200000) -- display RAM or similar
+        self._pram0 = Memory(160 * 1024)
+        self._memory.add(0xFE200000, self._pram0, name="PRAM0", perms="RW")
+
+        # XRAM0 (224KB at 0xFE240000) -- extended RAM
+        self._xram0 = Memory(224 * 1024)
+        self._memory.add(0xFE240000, self._xram0, name="XRAM0", perms="RW")
+
+        # Catch-all MMIO regions for Casio SH7305 peripheral space.
+        # The OS writes to various undocumented MMIO registers during boot.
+        # We silently accept all reads (returning 0) and writes.
+        # Region 1: 0xA4000000-0xA4FFFFFF (1MB, covers most Casio peripherals)
+        # Region 2: 0xA4150000-0xA4160000 (64KB, CPG area -- overlaps region 1
+        #            but MemoryMap resolves the first match, so we add it first)
+        # Region 3: 0xFEC00000-0xFEC40000 (256KB, undocumented I/O)
+        self._mmio_a4 = Memory(0x1000000)   # 16MB at 0xA4000000
+        self._memory.add(0xA4000000, self._mmio_a4, name="MMIO (A4xxxxxx)", perms="RW")
+
+        # 0xFF000000 area (BSC, UBC, etc.)
+        self._mmio_ff = Memory(0x1000000)   # 16MB at 0xFF000000
+        self._memory.add(0xFF000000, self._mmio_ff, name="MMIO (FFxxxxxx)", perms="RW")
+
+        self._mmio_catchall = Memory(0x40000)   # 256KB at 0xFEC00000
+        self._memory.add(0xFEC00000, self._mmio_catchall, name="MMIO (catch-all)", perms="RW")
 
         self.setup_direct_io()
 
@@ -163,6 +224,11 @@ class Classpad:
         return self._dma
 
     @property
+    def display(self):
+        """The Display peripheral, or None if not attached."""
+        return self._display
+
+    @property
     def intc(self):
         """The InterruptController, or None if not attached."""
         return self._intc
@@ -191,8 +257,34 @@ class Classpad:
             except Exception as e:
                 print(f"!!! CPU Error : {e} !!!")
                 self._cpu.stacktrace()
+                # Full register dump for debugging
+                self._dump_full_state()
                 if self.debug:
                     raise
+
+    def _dump_full_state(self):
+        """Print a complete dump of all CPU registers for debugging."""
+        r = self._cpu.regs
+        print("\n--- Full CPU State ---")
+        for i in range(0, 16, 4):
+            print(f"  R{i:<2}=0x{r[i]:08X}  R{i+1:<2}=0x{r[i+1]:08X}  "
+                  f"R{i+2:<2}=0x{r[i+2]:08X}  R{i+3:<2}=0x{r[i+3]:08X}")
+        print(f"  PR =0x{r['pr']:08X}  SR =0x{r['sr']:08X}  "
+              f"GBR=0x{r['gbr']:08X}  VBR=0x{r['vbr']:08X}")
+        print(f"  MACH=0x{r['mach']:08X}  MACL=0x{r['macl']:08X}")
+        print(f"  PC =0x{self._cpu.pc:08X}  SPC=0x{self._cpu.spc:08X}  "
+              f"SSR=0x{self._cpu.ssr:08X}  SGR=0x{self._cpu.sgr:08X}")
+        print(f"  DBR=0x{self._cpu.dbr:08X}  EXPEVT=0x{self._cpu.expevt:08X}  "
+              f"TRA=0x{self._cpu.tra:08X}  INTEVT=0x{self._cpu.intevt:08X}")
+        print(f"  TEA=0x{self._cpu.tea:08X}  sleeping={self._cpu.is_sleeping}")
+        # Dump banked registers
+        rb = self._cpu.r_bank
+        if any(v != 0 for v in rb):
+            print(f"  R0B=0x{rb[0]:08X}  R1B=0x{rb[1]:08X}  "
+                  f"R2B=0x{rb[2]:08X}  R3B=0x{rb[3]:08X}")
+            print(f"  R4B=0x{rb[4]:08X}  R5B=0x{rb[5]:08X}  "
+                  f"R6B=0x{rb[6]:08X}  R7B=0x{rb[7]:08X}")
+        print("--- End State ---\n")
 
     def add_rom(self, rom: bytes, index: int, name: str = "UserRom", perms: str = None):
         rom_memory = Memory(len(rom))
