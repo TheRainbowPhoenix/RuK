@@ -206,6 +206,40 @@ disp_addr:
 """
 
 
+DRAW_100_PX = """
+mov.l prdr_addr, r14
+    mov.l disp_addr, r13
+    mov.b @r14, r0
+    and #0xEF, r0
+    mov.b r0, @r14
+    mov #0x02, r0
+    shll8 r0
+    or #0x02, r0
+    mov.w r0, @r13
+    mov.b @r14, r0
+    or #0x10, r0
+    mov.b r0, @r14
+    mov #0, r2
+    mov #100, r3
+    loop:
+    mov r2, r0
+    shll8 r0
+    mov.w r0, @r13
+    add #1, r2
+    cmp/ge r3, r2
+    bf loop
+    bra end
+    nop
+    end:
+bra end
+    nop
+    .align 2
+    prdr_addr:
+    .long 0xA405013C
+    disp_addr:
+    .long 0xB4000000
+"""
+
 # ---- Program 3: TcPredictive DSP Test ----
 # Runs TcPredictive DSP operations with test data
 TCPREDICTIVE_ASM = """
@@ -311,6 +345,7 @@ BARE_METAL_PROGRAMS = {
     'dsp_sine_wave': DSP_SINE_WAVE_ASM,
     'tcpredictive': TCPREDICTIVE_ASM,
     'rtc_clock': RTC_CLOCK_ASM,
+    '100px': DRAW_100_PX,
 }
 
 
@@ -447,6 +482,11 @@ def run_bare_metal_program(name, asm_code, start_pc=0x8C000000, max_steps=500000
 
 class TestBareMetalPrograms(unittest.TestCase):
     """Test bare-metal programs run correctly."""
+
+    def test_100px(self):
+        """LCD color bars program should draw pixels to the screen."""
+        cpu, display, steps = run_bare_metal_program(
+            '100px', DRAW_100_PX, max_steps=500000)
 
     def test_lcd_color_bars(self):
         """LCD color bars program should draw pixels to the screen."""

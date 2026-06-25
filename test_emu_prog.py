@@ -37,7 +37,7 @@ def main():
                         help='Print each instruction as it executes')
     parser.add_argument('--rom', default='cp400/3070.bin',
                         help='Path to the OS ROM (default: cp400/3070.bin)')
-    parser.add_argument('--addin', default='bare_metal/lcd_color_bars.bin',
+    parser.add_argument('--addin', default='bare_metal/100px.bin',
                         help='Path to the add-in binary')
     parser.add_argument('--start-pc', type=lambda x: int(x, 0),
                         default=0x8C000000,

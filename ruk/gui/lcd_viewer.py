@@ -18,9 +18,7 @@ class LCDViewerWindow(BaseWindow):
         toplevel = tk.Toplevel(root)
         super().__init__(title="LCD Display :: RuK", root=toplevel)
         self.display = display
-        self._scale = 1   # 1x scaling
-        self._w = 360
-        self._h = 640
+        self._scale = 1   # 1x scaling (360x640 is already large)
         self._auto_refresh = False
         self._refresh_interval = 100   # ms
         self._after_id = None
@@ -29,6 +27,15 @@ class LCDViewerWindow(BaseWindow):
     def _setup(self):
         self.root.rowconfigure(0, weight=1)
         self.root.columnconfigure(0, weight=1)
+
+        # Determine display dimensions
+        if self.display is not None:
+            fb = self.display.get_framebuffer()
+            self._fb_width = len(fb[0]) if fb and len(fb) > 0 else 360
+            self._fb_height = len(fb) if fb else 640
+        else:
+            self._fb_width = 360
+            self._fb_height = 640
 
         # Toolbar
         toolbar = ttk.Frame(self.root)
@@ -42,15 +49,6 @@ class LCDViewerWindow(BaseWindow):
                                      command=self._toggle_auto)
         auto_check.pack(side=tk.LEFT, padx=2)
 
-        # Determine display dimensions
-        if self.display is not None:
-            fb = self.display.get_framebuffer()
-            self._fb_width = len(fb[0]) if fb and len(fb) > 0 else self._w
-            self._fb_height = len(fb) if fb else self._h
-        else:
-            self._fb_width = self._w
-            self._fb_height = self._h
-
         # Canvas for the LCD
         canvas_w = self._fb_width * self._scale
         canvas_h = self._fb_height * self._scale
@@ -58,19 +56,9 @@ class LCDViewerWindow(BaseWindow):
                                 bg='black', highlightthickness=0)
         self.canvas.grid(row=1, column=0, sticky='nsew', padx=5, pady=5)
 
-        # Scrollbars (in case window is smaller than canvas)
-        h_scroll = ttk.Scrollbar(self.root, orient=tk.HORIZONTAL, command=self.canvas.xview)
-        v_scroll = ttk.Scrollbar(self.root, orient=tk.VERTICAL, command=self.canvas.yview)
-        self.canvas.configure(xscrollcommand=h_scroll.set, yscrollcommand=v_scroll.set)
-        h_scroll.grid(row=2, column=0, sticky='ew')
-        v_scroll.grid(row=1, column=1, sticky='ns')
-
-        # Set scroll region
-        self.canvas.configure(scrollregion=(0, 0, canvas_w, canvas_h))
-
         # Create the PhotoImage for rendering
         self._image = tk.PhotoImage(width=self._fb_width, height=self._fb_height)
-        self.canvas.create_image(0, 0, anchor=tk.NW, image=self._image)
+        self._image_item = self.canvas.create_image(0, 0, anchor=tk.NW, image=self._image)
 
         # Initial render
         self._refresh()
@@ -104,14 +92,13 @@ class LCDViewerWindow(BaseWindow):
         if fb_width == 0 or fb_height == 0:
             return
 
-        # Build pixel data as a hex string for PhotoImage.put()
-        # PhotoImage.put() expects a list of strings like "#RRGGBB ..."
         # Resize the PhotoImage if dimensions don't match
         if self._image is None or self._image.width() != fb_width or self._image.height() != fb_height:
             self._image = tk.PhotoImage(width=fb_width, height=fb_height)
-            self.canvas.delete("all")
-            self.canvas.create_image(0, 0, anchor=tk.NW, image=self._image)
+            self.canvas.itemconfig(self._image_item, image=self._image)
 
+        # Build pixel data as a hex string for PhotoImage.put()
+        # This is the bottleneck for large displays (360x640 = 230K pixels)
         pixel_rows = []
         for y in range(fb_height):
             row_pixels = []
@@ -123,10 +110,8 @@ class LCDViewerWindow(BaseWindow):
 
         self._image.put(pixel_rows)
 
-        # Scale up by zooming (PhotoImage zoom)
-        self._image_zoomed = self._image.zoom(self._scale, self._scale)
-        # Update the canvas image (delete old zoomed image first to avoid stacking)
-        self.canvas.create_image(0, 0, anchor=tk.NW, image=self._image_zoomed)
+        # Update the canvas image (reuse the same item, don't create new ones)
+        self.canvas.itemconfig(self._image_item, image=self._image)
 
     def _toggle_auto(self):
         if self._auto_var.get():

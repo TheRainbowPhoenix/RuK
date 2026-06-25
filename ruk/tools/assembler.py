@@ -254,8 +254,26 @@ class SH4Assembler:
         mnem = parts[0].lower()
         operands = parts[1] if len(parts) > 1 else ''
 
-        # Split operands by comma
-        ops = [o.strip() for o in operands.split(',')] if operands else []
+        # Split operands by comma, but NOT inside parentheses
+        # (e.g. "@(0, r15)" should be one operand, not two)
+        ops = []
+        if operands:
+            depth = 0
+            current = ''
+            for c in operands:
+                if c == '(':
+                    depth += 1
+                    current += c
+                elif c == ')':
+                    depth -= 1
+                    current += c
+                elif c == ',' and depth == 0:
+                    ops.append(current.strip())
+                    current = ''
+                else:
+                    current += c
+            if current.strip():
+                ops.append(current.strip())
 
         return self._encode(mnem, ops, addr)
 
@@ -305,22 +323,21 @@ class SH4Assembler:
                 if rm is not None and rn is not None:
                     return (0b0110 << 12) | (rn << 8) | (rm << 4) | 0b0011
                 # mov.l Rm, @(disp,Rn)
-                if rm is not None and dst.startswith('@(') and 'R' in dst:
-                    # Extract disp and Rn from @(disp,Rn)
+                if rm is not None and dst.startswith('@(') and ')' in dst:
                     inner = dst[2:dst.index(')')]
                     parts = inner.split(',')
                     if len(parts) == 2:
-                        disp = parse_imm(parts[0]) or 0
-                        rn2 = parse_reg(parts[1])
+                        disp = parse_imm(parts[0].strip()) or 0
+                        rn2 = parse_reg(parts[1].strip())
                         if rn2 is not None:
                             return (0b0001 << 12) | (rn2 << 8) | (rm << 4) | ((disp // 4) & 0xF)
                 # mov.l @(disp,Rm), Rn
-                if src.startswith('@(') and rn is not None:
+                if src.startswith('@(') and rn is not None and ')' in src:
                     inner = src[2:src.index(')')]
                     parts = inner.split(',')
                     if len(parts) == 2:
-                        disp = parse_imm(parts[0]) or 0
-                        rm2 = parse_reg(parts[1])
+                        disp = parse_imm(parts[0].strip()) or 0
+                        rm2 = parse_reg(parts[1].strip())
                         if rm2 is not None:
                             return (0b0101 << 12) | (rn << 8) | (rm2 << 4) | ((disp // 4) & 0xF)
                 # mov.l Rm, @Rn
