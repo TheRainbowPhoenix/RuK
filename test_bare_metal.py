@@ -39,9 +39,6 @@ from ruk.tools.assembler import assemble
 PRDR_ADDR = 0xA405013C
 DISP_ADDR = 0xB4000000
 
-# Generated bare-metal binaries are written next to this test file.
-BARE_METAL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bare_metal")
-
 
 # ---- Program 1: LCD Color Bars ----
 # Uses PC-relative constant pool to load addresses, then writes pixels
@@ -206,40 +203,6 @@ disp_addr:
 """
 
 
-DRAW_100_PX = """
-mov.l prdr_addr, r14
-    mov.l disp_addr, r13
-    mov.b @r14, r0
-    and #0xEF, r0
-    mov.b r0, @r14
-    mov #0x02, r0
-    shll8 r0
-    or #0x02, r0
-    mov.w r0, @r13
-    mov.b @r14, r0
-    or #0x10, r0
-    mov.b r0, @r14
-    mov #0, r2
-    mov #100, r3
-    loop:
-    mov r2, r0
-    shll8 r0
-    mov.w r0, @r13
-    add #1, r2
-    cmp/ge r3, r2
-    bf loop
-    bra end
-    nop
-    end:
-bra end
-    nop
-    .align 2
-    prdr_addr:
-    .long 0xA405013C
-    disp_addr:
-    .long 0xB4000000
-"""
-
 # ---- Program 3: TcPredictive DSP Test ----
 # Runs TcPredictive DSP operations with test data
 TCPREDICTIVE_ASM = """
@@ -295,6 +258,39 @@ k_addr:
 .long 0x8C002000
 """
 
+DRAW_100_PX = """
+mov.l prdr_addr, r14
+    mov.l disp_addr, r13
+    mov.b @r14, r0
+    and #0xEF, r0
+    mov.b r0, @r14
+    mov #0x02, r0
+    shll8 r0
+    or #0x02, r0
+    mov.w r0, @r13
+    mov.b @r14, r0
+    or #0x10, r0
+    mov.b r0, @r14
+    mov #0, r2
+    mov #100, r3
+    loop:
+    mov r2, r0
+    shll8 r0
+    mov.w r0, @r13
+    add #1, r2
+    cmp/ge r3, r2
+    bf loop
+    bra end
+    nop
+    end:
+bra end
+    nop
+    .align 2
+    prdr_addr:
+    .long 0xA405013C
+    disp_addr:
+    .long 0xB4000000
+"""
 
 # ---- Program 4: RTC Clock Display ----
 # Reads the RTC time registers and stores them in memory
@@ -338,112 +334,6 @@ rtc_base:
 result_addr:
 .long 0x8C003000
 """
-
-LCD_SETUP_PREAMBLE = """
-    mov.l prdr_addr, r14
-    mov.l disp_addr, r13
-
-    ! RS=0, set H addr = 0 (reg 0x200)
-    mov.b @r14, r0
-    and #0xEF, r0
-    mov.b r0, @r14
-    mov #0x02, r0
-    shll8 r0
-    mov.w r0, @r13
-
-    mov.b @r14, r0
-    or #0x10, r0
-    mov.b r0, @r14
-    mov #0, r0
-    mov.w r0, @r13
-
-    ! RS=0, set V addr = 0 (reg 0x201)
-    mov.b @r14, r0
-    and #0xEF, r0
-    mov.b r0, @r14
-    mov #0x02, r0
-    shll8 r0
-    or #0x01, r0
-    mov.w r0, @r13
-
-    mov.b @r14, r0
-    or #0x10, r0
-    mov.b r0, @r14
-    mov #0, r0
-    mov.w r0, @r13
-
-    ! RS=0, select GRAM (0x202)
-    mov.b @r14, r0
-    and #0xEF, r0
-    mov.b r0, @r14
-    mov #0x02, r0
-    shll8 r0
-    or #0x02, r0
-    mov.w r0, @r13
-
-    ! RS=1 (data mode for pixels)
-    mov.b @r14, r0
-    or #0x10, r0
-    mov.b r0, @r14
-"""
-
-LCD_CONST_POOL = """
-    .align 2
-    prdr_addr:
-    .long 0xA405013C
-    disp_addr:
-    .long 0xB4000000
-"""
-LCD_FULL_GRADIENT = LCD_SETUP_PREAMBLE + """
-    ! Pre-compute loop limits ONCE before the loops
-    ! r7 = 360 (col limit)
-    mov #0x01, r7
-    shll8 r7
-    mov #0x68, r0
-    or r0, r7
-    ! r8 = 640 (row limit) = 0x280
-    ! Can't use mov #0x80 (sign-extends to 0xFFFFFF80)
-    ! Instead: 640 = 5 << 7 = 5 * 128
-    mov #5, r8
-    shll2 r8
-    shll2 r8
-    shll2 r8
-    shll r8
-
-    mov #0, r2
-
-    row_loop:
-    mov #0, r3
-
-    col_loop:
-    mov r2, r0
-    and #0xF8, r0
-    shll8 r0
-    mov r3, r1
-    and #0xFC, r1
-    or r1, r0
-    mov.w r0, @r13
-    add #1, r3
-    cmp/ge r7, r3
-    bf col_loop
-    add #1, r2
-    cmp/ge r8, r2
-    bf row_loop
-    bra end
-    nop
-    end:
-    bra end
-    nop
-""" + LCD_CONST_POOL
-
-BARE_METAL_PROGRAMS = {
-    'lcd_color_bars': LCD_COLOR_BARS_ASM,
-    'dsp_sine_wave': DSP_SINE_WAVE_ASM,
-    'tcpredictive': TCPREDICTIVE_ASM,
-    'rtc_clock': RTC_CLOCK_ASM,
-    '100px': DRAW_100_PX,
-    'full_grad': LCD_FULL_GRADIENT,
-}
 
 
 # ============================================================================
@@ -494,19 +384,8 @@ def make_cpu_with_peripherals(start_pc=0x8C000000, sr=0x40000000 | 0x1000):
     return cpu, mem, display
 
 
-def write_bare_metal_binary(name, binary, output_dir=BARE_METAL_DIR):
-    """Write an assembled bare-metal program to <output_dir>/<name>.bin."""
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f"{name}.bin")
-
-    with open(output_path, "wb") as f:
-        f.write(binary)
-
-    return output_path
-
-
 def run_bare_metal_program(name, asm_code, start_pc=0x8C000000, max_steps=500000):
-    """Assemble, write, and run a bare-metal program.
+    """Assemble and run a bare-metal program.
 
     Returns (cpu, display, step_count) after running.
     """
@@ -514,11 +393,9 @@ def run_bare_metal_program(name, asm_code, start_pc=0x8C000000, max_steps=500000
     print(f"Running bare-metal program: {name}")
     print(f"{'='*60}")
 
-    # Assemble the program and emit its standalone binary.
+    # Assemble the program
     binary = assemble(asm_code, start_addr=start_pc)
-    output_path = write_bare_metal_binary(name, binary)
     print(f"  Assembled: {len(binary)} bytes")
-    print(f"  Wrote binary: {output_path}")
 
     # Create CPU with peripherals
     cpu, mem, display = make_cpu_with_peripherals(start_pc=start_pc)
@@ -583,12 +460,8 @@ class TestBareMetalPrograms(unittest.TestCase):
     def test_100px(self):
         """LCD color bars program should draw pixels to the screen."""
         cpu, display, steps = run_bare_metal_program(
-            '100px', DRAW_100_PX, max_steps=500000)
-    
-    def test_full_grad(self):
-        """LCD color bars program should draw pixels to the screen."""
-        cpu, display, steps = run_bare_metal_program(
-            'full_grad', LCD_FULL_GRADIENT, max_steps=500000)
+            'DRAW_100_PX', DRAW_100_PX, max_steps=500000)
+
 
     def test_lcd_color_bars(self):
         """LCD color bars program should draw pixels to the screen."""
@@ -652,9 +525,16 @@ def run_all_tests():
 
 
 if __name__ == '__main__':
-    if len(sys.argv) > 1 and sys.argv[1] in BARE_METAL_PROGRAMS:
-        # Run a single program. This also writes bare_metal/<program>.bin.
-        cpu, display, steps = run_bare_metal_program(
-            sys.argv[1], BARE_METAL_PROGRAMS[sys.argv[1]])
+    if len(sys.argv) > 1 and sys.argv[1] in ('lcd_color_bars', 'dsp_sine_wave',
+                                               'tcpredictive', 'rtc_clock', '100px'):
+        # Run a single program
+        programs = {
+            'lcd_color_bars': LCD_COLOR_BARS_ASM,
+            'dsp_sine_wave': DSP_SINE_WAVE_ASM,
+            'tcpredictive': TCPREDICTIVE_ASM,
+            'rtc_clock': RTC_CLOCK_ASM,
+            '100px': DRAW_100_PX,
+        }
+        cpu, display, steps = run_bare_metal_program(sys.argv[1], programs[sys.argv[1]])
     else:
         sys.exit(run_all_tests())

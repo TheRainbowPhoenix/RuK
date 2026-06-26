@@ -22,17 +22,27 @@ It should run fine under Windows, Linux, or even MacOS.
 
 Support for binaries and custom ROM are planned.
 
+![full_1.4](docs/img/full_1.4.png)
+
 ## Using the GUI
 As RuK is reaching the V1.0, a cool GUI is now work in progress !
 
 You can test it right away :
 ````
-python3 test_gui.py
+python3 run_gui.py
 ````
-![gui_pre_v1-3.png](docs/res/gui_pre_v1-3.png)
+![gui_pre_v1-3.png](docs/img/project_list.png)
+
+From there, you are able to create a new project, or assemble and run your own !
+
+![assemble_and_run](docs/img/assemble_and_run.png)
+
+![new_project](docs/img/new_project.png)
 
 This GUI make you able to both take a look at the assembly, and the registers values but also to edit the registers, in real time !
 Try to edit the `pc` register value while running the code, and you'll see te magic.
+
+![main_win](docs/img/main_win.png)
 
 It is also written in TK, using the excellent [rdbende/Sun-Valley-ttk-theme](https://github.com/rdbende/Sun-Valley-ttk-theme) TTK Theme, so do dependencies are expected.
 

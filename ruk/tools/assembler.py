@@ -117,16 +117,26 @@ class SH4Assembler:
                 continue
 
             # Label definition (named or numeric)
-            if line.endswith(':') and ' ' not in line:
-                label = line[:-1]
-                if label.isdigit():
-                    # Numeric label: store all occurrences
-                    if label not in self.numeric_labels:
-                        self.numeric_labels[label] = []
-                    self.numeric_labels[label].append(addr)
-                else:
-                    self.labels[label] = addr
-                continue
+            # A label can be on its own line ("loop:") or followed by
+            # an instruction/directive ("label: nop" or "label: .long 0x42")
+            if ':' in line:
+                colon_idx = line.index(':')
+                label_candidate = line[:colon_idx].strip()
+                rest = line[colon_idx + 1:].strip()
+                # Check if it's a valid label name (alphanumeric + underscore)
+                if label_candidate and (label_candidate.isalnum() or
+                    (label_candidate[0].isalpha() or label_candidate[0] == '_') and
+                    all(c.isalnum() or c == '_' for c in label_candidate)):
+                    if label_candidate.isdigit():
+                        if label_candidate not in self.numeric_labels:
+                            self.numeric_labels[label_candidate] = []
+                        self.numeric_labels[label_candidate].append(addr)
+                    else:
+                        self.labels[label_candidate] = addr
+                    # Process the rest of the line if there's more
+                    if not rest:
+                        continue
+                    line = rest  # fall through to process the instruction/directive
 
             # Directive
             if line.startswith('.'):
@@ -157,9 +167,17 @@ class SH4Assembler:
             if not line:
                 continue
 
-            # Label definition
-            if line.endswith(':') and ' ' not in line:
-                continue
+            # Label definition (same logic as pass 1)
+            if ':' in line:
+                colon_idx = line.index(':')
+                label_candidate = line[:colon_idx].strip()
+                rest = line[colon_idx + 1:].strip()
+                if label_candidate and (label_candidate.isalnum() or
+                    (label_candidate[0].isalpha() or label_candidate[0] == '_') and
+                    all(c.isalnum() or c == '_' for c in label_candidate)):
+                    if not rest:
+                        continue
+                    line = rest  # process the rest of the line
 
             # Directive
             if line.startswith('.'):
@@ -283,6 +301,9 @@ class SH4Assembler:
         # ---- NOP ----
         if mnem == 'nop':
             return 0x0009
+
+        if mnem == 'synco':
+            return 0x00AB
 
         # ---- MOV ----
         if mnem == 'mov' or mnem == 'mov.l':

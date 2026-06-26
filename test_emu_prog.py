@@ -35,9 +35,9 @@ def main():
                         help='Maximum number of CPU steps before giving up')
     parser.add_argument('--trace', action='store_true',
                         help='Print each instruction as it executes')
-    parser.add_argument('--rom', default='cp400/3070.bin',
+    parser.add_argument('--rom', default='bare_metal/full_grad.bin',
                         help='Path to the OS ROM (default: cp400/3070.bin)')
-    parser.add_argument('--addin', default='bare_metal/100px.bin',
+    parser.add_argument('--addin', default='bare_metal/full_grad.bin',
                         help='Path to the add-in binary')
     parser.add_argument('--start-pc', type=lambda x: int(x, 0),
                         default=0x8C000000,
@@ -62,7 +62,6 @@ def main():
     rom_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), args.rom)
     if not os.path.exists(rom_path):
         print(f"ROM file not found: {rom_path}")
-        print("Download from: https://github.com/TheRainbowPhoenix/RuK/releases/download/0.0.1/3070.bin")
         return 1
 
     # Reading raw bytes
