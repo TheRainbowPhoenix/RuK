@@ -192,7 +192,13 @@ class SH4Assembler:
                 elif line.startswith('.long') or line.startswith('.int'):
                     parts = line.split(None, 1)
                     if len(parts) >= 2:
-                        val = parse_imm(parts[1]) or 0
+                        arg = parts[1].strip()
+                        # Try label resolution first, then immediate
+                        label_addr = self._resolve_label(arg, addr)
+                        if label_addr is not None:
+                            val = label_addr
+                        else:
+                            val = parse_imm(arg) or 0
                         self.output.extend(val.to_bytes(4, 'big'))
                     else:
                         self.output.extend(b'\x00\x00\x00\x00')
@@ -761,6 +767,25 @@ class SH4Assembler:
 
         # ---- DT ----
         if mnem == 'dt':
+            if len(ops) == 1:
+                rn = parse_reg(ops[0])
+                if rn is not None:
+                    return (0b0100 << 12) | (rn << 8) | 0x10
+
+        # ---- NEG / NEGC ----
+        if mnem == 'neg':
+            if len(ops) == 2:
+                rm = parse_reg(ops[0])
+                rn = parse_reg(ops[1])
+                if rm is not None and rn is not None:
+                    return (0b0110 << 12) | (rn << 8) | (rm << 4) | 0b1011
+
+        if mnem == 'negc':
+            if len(ops) == 2:
+                rm = parse_reg(ops[0])
+                rn = parse_reg(ops[1])
+                if rm is not None and rn is not None:
+                    return (0b0110 << 12) | (rn << 8) | (rm << 4) | 0b1110
             if len(ops) == 1:
                 rn = parse_reg(ops[0])
                 if rn is not None:

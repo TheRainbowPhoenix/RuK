@@ -316,7 +316,7 @@ class AssembleAndRunDialog(ModalWindow):
         self.result: Project = None
 
         self._top = self.root
-        self._top.geometry("480x200")
+        self._top.geometry("350x250")
         self._top.transient(parent)
         self._top.grab_set()
 
