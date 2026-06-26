@@ -75,7 +75,7 @@ def write_lcd_pixel(display, color):
     """Helper: write a pixel to the LCD GRAM."""
     # Make sure we're in GRAM mode and RS=1
     display.prdr |= 0x10  # RS=1
-    display.mode = 0x202  # GRAM
+    display.mode = 0x2C  # GRAM
     display.disp_write16(color)
 
 
@@ -114,10 +114,10 @@ class TestLCDDirect(unittest.TestCase):
 
     def test_lcd_register_write(self):
         """Test writing to LCD registers via the display interface."""
-        # Set RS=0, write register index 0x202 (GRAM)
+        # Set RS=0, write register index 0x2C (GRAM)
         self.display.prdr = 0  # RS=0
-        self.display.disp_write16(0x0202)
-        self.assertEqual(self.display.mode, 0x202)
+        self.display.disp_write16(0x2C)
+        self.assertEqual(self.display._cmd, 0x2C)
 
         # Set RS=1, write pixel data
         self.display.prdr = 0x10  # RS=1
@@ -128,13 +128,18 @@ class TestLCDDirect(unittest.TestCase):
 
     def test_lcd_multiple_pixels(self):
         """Test writing multiple pixels via GRAM auto-increment."""
-        # Set GRAM mode
-        set_lcd_register(self.display, 0x200, 0)  # H addr = 0
-        set_lcd_register(self.display, 0x201, 0)  # V addr = 0
+        # Set column address 0x2A: start=0, end=359
+        self.display.prdr = 0; self.display.disp_write16(0x2A); self.display.prdr = 0x10
+        self.display.disp_write16(0); self.display.disp_write16(0)
+        self.display.disp_write16(1); self.display.disp_write16(0x67)
+        # Set page address 0x2B: start=0, end=639
+        self.display.prdr = 0; self.display.disp_write16(0x2B); self.display.prdr = 0x10
+        self.display.disp_write16(0); self.display.disp_write16(0)
+        self.display.disp_write16(2); self.display.disp_write16(0x7F)
 
         # Select GRAM register
         self.display.prdr = 0  # RS=0
-        self.display.disp_write16(0x0202)  # select GRAM
+        self.display.disp_write16(0x2C)  # select GRAM
         self.display.prdr = 0x10  # RS=1
 
         # Write 10 pixels with different colors
@@ -158,7 +163,7 @@ class TestLCDViaCPU(unittest.TestCase):
 
         # Assemble a program that:
         # 1. Loads PRDR and DISP addresses
-        # 2. Sets RS=0, selects GRAM (0x202)
+        # 2. Sets RS=0, selects GRAM (0x2C)
         # 3. Sets RS=1, writes a red pixel (0xF800)
         program = assemble("""
             mov.l prdr_addr, r14
@@ -169,10 +174,8 @@ class TestLCDViaCPU(unittest.TestCase):
             and #0xEF, r0
             mov.b r0, @r14
 
-            ! Select GRAM register (0x202)
-            mov #0x02, r0
-            shll8 r0
-            or #0x02, r0
+            ! Select GRAM register (0x2C)
+            mov #0x2C, r0
             mov.w r0, @r13
 
             ! RS=1 (data mode)
@@ -225,9 +228,7 @@ class TestLCDViaCPU(unittest.TestCase):
             mov.b @r14, r0
             and #0xEF, r0
             mov.b r0, @r14
-            mov #0x02, r0
-            shll8 r0
-            or #0x02, r0
+            mov #0x2C, r0
             mov.w r0, @r13
 
             ! RS=1 (data mode for pixels)
@@ -296,9 +297,7 @@ class TestLCDViaCPU(unittest.TestCase):
             mov.b @r14, r0
             and #0xEF, r0
             mov.b r0, @r14
-            mov #0x02, r0
-            shll8 r0
-            or #0x02, r0
+            mov #0x2C, r0
             mov.w r0, @r13
 
             ! RS=1
@@ -356,19 +355,19 @@ class TestLCDResolution(unittest.TestCase):
     """Test that the LCD resolution is correct (640x224)."""
 
     def test_resolution(self):
-        """Display should be 640x224."""
+        """Display should be 360x640."""
         self.assertEqual(DISPLAY_WIDTH, 360)
         self.assertEqual(DISPLAY_HEIGHT, 640)
 
     def test_framebuffer_size(self):
-        """Framebuffer should have 640 rows of 360 pixels."""
+        """Framebuffer should have 224 rows of 640 pixels."""
         display = Display()
         fb = display.get_framebuffer()
         self.assertEqual(len(fb), 640)
         self.assertEqual(len(fb[0]), 360)
 
     def test_pixel_at_corner(self):
-        """Should be able to set a pixel at (639, 359)."""
+        """Should be able to set a pixel at (359, 639)."""
         display = Display()
         display.set_pixel(359, 639, 0x1234)
         self.assertEqual(display.get_pixel(359, 639), 0x1234)

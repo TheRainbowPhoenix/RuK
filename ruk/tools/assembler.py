@@ -187,7 +187,7 @@ class SH4Assembler:
                         val = parse_imm(parts[1]) or 0
                         self.output.extend(val.to_bytes(2, 'big'))
                     else:
-                        self.output.extend(b'\x00\x00')
+                        self.output.extend(b'\x00\x09')
                     addr += 2
                 elif line.startswith('.long') or line.startswith('.int'):
                     parts = line.split(None, 1)
@@ -201,7 +201,7 @@ class SH4Assembler:
                             val = parse_imm(arg) or 0
                         self.output.extend(val.to_bytes(4, 'big'))
                     else:
-                        self.output.extend(b'\x00\x00\x00\x00')
+                        self.output.extend(b'\x00\x09\x00\x09')
                     addr += 4
                 elif line.startswith('.align'):
                     parts = line.split()
@@ -219,7 +219,7 @@ class SH4Assembler:
                 self.output.extend(opcode.to_bytes(2, 'big'))
             else:
                 self.errors.append(f"Unknown instruction: {line}")
-                self.output.extend(b'\x00\x00')
+                self.output.extend(b'\x00\x09')
             addr += 2
 
         return self.output
