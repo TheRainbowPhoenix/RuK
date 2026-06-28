@@ -389,6 +389,124 @@ class AssembleAndRunDialog(ModalWindow):
 
 
 # ============================================================================
+# Open Addin dialog (quick launch for .hh3 files)
+# ============================================================================
+
+class OpenAddinDialog(ModalWindow):
+    """Quick-launch: pick an .hh3 addin, load it via the ELF loader, and go.
+
+    The addin's entry point is read from the ELF header; the OS ROM is
+    loaded for the memory map (RAM, ILRAM, MMIO catch-alls) but the CPU
+    starts at the addin's entry point with argc/argv/envp set up.
+    """
+
+    def __init__(self, parent: tk.Tk, default_rom: str = None):
+        super().__init__(parent=parent, title="Open Addin")
+        self.result: Project = None
+
+        self._top = self.root
+        self._top.geometry("420x300")
+        self._top.transient(parent)
+        self._top.grab_set()
+
+        body = ttk.Frame(self._top, padding=16)
+        body.pack(fill='both', expand=True)
+
+        ttk.Label(body, text="Open HH3 Addin", font=('Segoe UI', 13, 'bold')).pack(anchor='w', pady=(0, 8))
+
+        ttk.Label(body, text="Project name:").pack(anchor='w')
+        self._name_var = tk.StringVar(value="HH3 Addin")
+        ttk.Entry(body, textvariable=self._name_var).pack(fill='x', pady=(0, 8))
+
+        ttk.Label(body, text="Addin (.hh3):").pack(anchor='w')
+        f = ttk.Frame(body)
+        f.pack(fill='x', pady=(0, 8))
+        self._hh3_var = tk.StringVar()
+        ttk.Entry(f, textvariable=self._hh3_var).pack(side='left', fill='x', expand=True)
+        ttk.Button(f, text="Browse…", command=self._browse_hh3).pack(side='left', padx=4)
+
+        ttk.Label(body, text="OS ROM (for memory map):").pack(anchor='w')
+        f2 = ttk.Frame(body)
+        f2.pack(fill='x', pady=(0, 8))
+        self._rom_var = tk.StringVar(value=default_rom or "")
+        ttk.Entry(f2, textvariable=self._rom_var).pack(side='left', fill='x', expand=True)
+        ttk.Button(f2, text="Browse…", command=self._browse_rom).pack(side='left', padx=4)
+
+        self._info = ttk.Label(body, text="", foreground='gray')
+        self._info.pack(anchor='w')
+
+        bar = ttk.Frame(self._top)
+        bar.pack(fill='x', padx=16, pady=(0, 12))
+        ttk.Button(bar, text="Cancel", command=self._cancel).pack(side='right', padx=4)
+        ttk.Button(bar, text="Open & Run", command=self._go).pack(side='right', padx=4)
+
+        parent.wait_window(self._top)
+
+    def _browse_hh3(self):
+        p = filedialog.askopenfilename(title="Select HH3 addin", parent=self._top,
+                                       filetypes=[("HH3 addins", "*.hh3"),
+                                                  ("ELF files", "*.elf"),
+                                                  ("All", "*.*")])
+        if p:
+            self._hh3_var.set(p)
+            base = os.path.splitext(os.path.basename(p))[0]
+            if base:
+                self._name_var.set(base)
+            # Try to read the entry point for the info label
+            try:
+                from ruk.jcore.hh3 import parse_elf
+                with open(p, 'rb') as f:
+                    data = f.read()
+                parsed = parse_elf(data)
+                self._info.config(
+                    text=f"Entry: 0x{parsed['e_entry']:08X}  "
+                         f"Segments: {parsed['e_phnum']}",
+                    foreground='green')
+            except Exception as e:
+                self._info.config(text=f"Cannot parse: {e}", foreground='red')
+
+    def _browse_rom(self):
+        p = filedialog.askopenfilename(title="Select OS ROM", parent=self._top,
+                                       filetypes=[("Binary", "*.bin"), ("All", "*.*")])
+        if p:
+            self._rom_var.set(p)
+
+    def _go(self):
+        hh3 = self._hh3_var.get().strip()
+        rom = self._rom_var.get().strip()
+        if not hh3 or not os.path.exists(hh3):
+            messagebox.showerror("Error", "Select a valid .hh3 file.", parent=self._top)
+            return
+        if not rom or not os.path.exists(rom):
+            messagebox.showerror("Error", "Select a valid OS ROM file.", parent=self._top)
+            return
+        # Validate the HH3 parses
+        try:
+            from ruk.jcore.hh3 import parse_elf
+            with open(hh3, 'rb') as f:
+                data = f.read()
+            parsed = parse_elf(data)
+        except Exception as e:
+            messagebox.showerror("Error", f"Cannot parse HH3:\n{e}", parent=self._top)
+            return
+
+        self.result = Project(
+            name=self._name_var.get(),
+            rom_path=rom,           # OS ROM -- needed for memory map
+            start_pc=parsed['e_entry'],  # addin entry point
+            sr_value=0x80000000,    # MD=1 (privileged)
+            with_tmu=True, with_rtc=True, with_dma=True,
+            with_display=True, with_ubc=True,
+            hh3_path=hh3,           # signal to run_gui.py to load via ELF loader
+        )
+        self._top.destroy()
+
+    def _cancel(self):
+        self.result = None
+        self._top.destroy()
+
+
+# ============================================================================
 # Main project loader window
 # ============================================================================
 
@@ -423,6 +541,7 @@ class ProjectLoaderWindow(BaseWindow):
         tb.pack(fill='x', pady=(0, 6))
         ttk.Button(tb, text="+  New Project", command=self._new_project).pack(side='left', padx=2)
         ttk.Button(tb, text="⚡  Assemble & Run", command=self._assemble_run).pack(side='left', padx=2)
+        ttk.Button(tb, text="Open Addin", command=self._open_addin).pack(side='left', padx=2)
 
         # Project list
         lf = ttk.LabelFrame(main, text="Recent Projects", padding=6)
@@ -469,6 +588,8 @@ class ProjectLoaderWindow(BaseWindow):
             rom_display = os.path.basename(p.rom_path) if p.rom_path else '(none)'
             if p.is_assembly:
                 rom_display += '  [ASM]'
+            if p.hh3_path:
+                rom_display += '  [HH3]'
             self._tree.insert('', tk.END, values=(p.name, rom_display, date_str))
 
     def _selected_project(self) -> Project:
@@ -524,6 +645,21 @@ class ProjectLoaderWindow(BaseWindow):
             self._refresh()
             self._launch(dlg.result)
 
+    def _open_addin(self):
+        """Open the HH3 addin picker dialog."""
+        # Default OS ROM path: look for cp400/3070.bin relative to the
+        # project root (two levels up from this file).
+        default_rom = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            'cp400', '3070.bin')
+        if not os.path.exists(default_rom):
+            default_rom = ''
+        dlg = OpenAddinDialog(self.root, default_rom=default_rom)
+        if dlg.result:
+            add_or_update_project(dlg.result)
+            self._refresh()
+            self._launch(dlg.result)
+
     def _open_selected(self):
         p = self._selected_project()
         if p:
@@ -540,6 +676,9 @@ class ProjectLoaderWindow(BaseWindow):
     def _launch(self, project: Project):
         if not project.rom_path or not os.path.exists(project.rom_path):
             messagebox.showerror("Error", f"ROM file not found:\n{project.rom_path}")
+            return
+        if project.hh3_path and not os.path.exists(project.hh3_path):
+            messagebox.showerror("Error", f"HH3 addin not found:\n{project.hh3_path}")
             return
         add_or_update_project(project)
         self.selected_project = project

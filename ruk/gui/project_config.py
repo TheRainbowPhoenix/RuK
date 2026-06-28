@@ -10,6 +10,7 @@ in a cross-platform location:
 
 import json
 import os
+import sys
 import time
 from typing import List, Dict, Optional
 from dataclasses import dataclass, field, asdict
@@ -36,8 +37,10 @@ class Project:
     with_dma: bool = True
     with_display: bool = True
     with_ubc: bool = True
-    last_opened: float = 0.0
     is_assembly: bool = False  # True if rom_path is an .asm file to assemble
+    last_opened: float = 0.0
+    # HH3-specific: if set, this project loads an .hh3 addin via the ELF loader
+    hh3_path: str = "" 
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -69,6 +72,7 @@ class Project:
             with_ubc=d.get('with_ubc', True),
             last_opened=d.get('last_opened', 0.0),
             is_assembly=d.get('is_assembly', False),
+        	hh3_path=d.get('hh3_path', ''),
         )
 
 
@@ -76,19 +80,24 @@ def get_config_dir() -> str:
     """Get the cross-platform config directory for RuK."""
     if sys.platform == 'win32':
         base = os.environ.get('APPDATA', os.path.expanduser('~'))
+        d = os.path.join(base, 'RuK')
     elif sys.platform == 'darwin':
-        base = os.path.expanduser('~/Library/Application Support')
+        d = os.path.expanduser('~/Library/Application Support/RuK')
     else:
         base = os.environ.get('XDG_CONFIG_HOME', os.path.expanduser('~/.config'))
-    return os.path.join(base, 'RuK')
-
-
-import sys  # needed by get_config_dir on some platforms
+        d = os.path.join(base, 'RuK')
+    os.makedirs(d, exist_ok=True)
+    return d
 
 
 def get_projects_file() -> str:
     """Get the path to the projects JSON file."""
     return os.path.join(get_config_dir(), 'projects.json')
+
+
+# ============================================================================
+# Load / save
+# ============================================================================
 
 
 def load_projects() -> List[Project]:
@@ -104,27 +113,28 @@ def load_projects() -> List[Project]:
         return []
 
 
-def save_projects(projects: List[Project]):
-    """Save the list of projects to disk."""
-    config_dir = get_config_dir()
-    os.makedirs(config_dir, exist_ok=True)
-    path = get_projects_file()
-    data = {
-        'projects': [p.to_dict() for p in projects],
-    }
-    with open(path, 'w') as f:
-        json.dump(data, f, indent=2)
+def save_projects(projects: List[Project]) -> None:
+    """Save the projects list to disk."""
+    f = get_projects_file()
+    data = {'projects': [Project.to_dict(p) for p in projects]}
+    with open(f, 'w') as fp:
+        json.dump(data, fp, indent=2)
 
 
-def add_or_update_project(project: Project):
-    """Add a project to the recent list (or update if it exists)."""
-    projects = load_projects()
-    # Remove duplicate (same name + rom_path)
-    projects = [p for p in projects if not (p.name == project.name and p.rom_path == project.rom_path)]
+# ============================================================================
+# Mutations
+# ============================================================================
+
+def add_or_update_project(project: Project) -> None:
+    """Add or update a project (matched by name).  Updates last_opened."""
     project.last_opened = time.time()
-    projects.insert(0, project)
-    # Keep only the last 20 projects
-    projects = projects[:20]
+    projects = load_projects()
+    for i, p in enumerate(projects):
+        if p.name == project.name:
+            projects[i] = project
+            save_projects(projects)
+            return
+    projects.append(project)
     save_projects(projects)
 
 

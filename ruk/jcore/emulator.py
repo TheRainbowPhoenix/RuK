@@ -37,6 +37,12 @@ def _b(val: int, size: int = 4) -> bytes:
     return (val & ((1 << (size * 8)) - 1)).to_bytes(size, 'big')
 
 
+# Sentinel returned by Emulator.dispatch() for opcodes that aren't in the
+# precomputed dispatch table and need the CPU to probe the DSP handler.
+# Using a module-level singleton avoids creating a new object each call.
+_DSP_PROBE = object()
+
+
 # ---------------------------------------------------------------------------
 # Branch-delay-slot helper
 # ---------------------------------------------------------------------------
@@ -51,18 +57,19 @@ def _exec_delay_slot(cpu, delay_slot_pc: int, branch_target: int):
     Mirrors cp-emu's `delayedBranch()` + `isBranchDelaySlot` logic.
     """
     cpu.pc = _u32(delay_slot_pc)
-    # Run one instruction.  We can't call cpu.step() because that would
-    # check the UBC and might trigger another break; instead, we inline
-    # the minimal step logic.
+    # Run one instruction using the fast dispatch table (not the old
+    # disassembler.disasm + resolve path, which was ~10x slower).
     try:
-        ins = cpu.mem.read16(cpu.pc)
-        if isinstance(ins, int):
-            op_val = ins
+        op_val = cpu.mem.read16(cpu.pc)
+        entry = cpu.emulator._dispatch[op_val]
+        if entry is not None:
+            handler, args = entry
+            handler(*args)
         else:
-            op_val = int.from_bytes(ins, "big")
-        op, args = cpu.disassembler.disasm(op_val)
-        callback = cpu.emulator.resolve(op)
-        callback(**args)
+            # Unknown / DSP -- fall back to single-step probe
+            op, dargs = cpu.disassembler.disasm(op_val)
+            callback = cpu.emulator.resolve(op)
+            callback(**dargs)
     except Exception:
         # If the delay slot fails (e.g. invalid opcode), just advance PC.
         cpu.pc = _u32(cpu.pc + 2)
@@ -247,8 +254,12 @@ class Emulator:
         self._reg(187, self.LDCL_SPC)    # LDC.L @Rm+, SPC
         self._reg(188, self.LDC_DBR)     # LDC Rm, DBR
         self._reg(189, self.LDCL_DBR)    # LDC.L @Rm+, DBR
-        self._reg(190, self.LDC_BANK)    # LDC Rm, Rn_BANK
-        self._reg(191, self.LDCL_BANK)   # LDC.L @Rm+, Rn_BANK
+
+        # LDC/STC for R0_BANK..R7_BANK (SH-4 register bank)
+        self._reg(190, self.LDC_RBANK)   # LDC Rm, Rn_BANK
+        self._reg(191, self.LDCL_RBANK)  # LDC.L @Rm+, Rn_BANK
+        self._reg(249, self.STC_RBANK)   # STC Rm_BANK, Rn
+        self._reg(250, self.STCL_RBANK)  # STC.L Rm_BANK, @-Rn
 
         # LDS Rm, PR/MACH/MACL
         self._reg(194, self.LDS_MACH)    # LDS Rm, MACH
@@ -308,6 +319,101 @@ class Emulator:
         # --- misc ---
         self._reg(270, self.TRAPA)       # TRAPA #imm
 
+        # --- multiply-accumulate (added for completeness) ---
+        self._reg(101, self.DMULS_L)     # DMULS.L Rm, Rn
+        self._reg(102, self.DMULU_L)     # DMULU.L Rm, Rn
+        self._reg(108, self.MAC_L)       # MAC.L @Rm+, @Rn+
+        self._reg(109, self.MAC_W)       # MAC.W @Rm+, @Rn+
+
+        # -----------------------------------------------------------------
+        # OPT-2: Precomputed dispatch table.
+        # 65536 entries, one per 16-bit opcode value, mapping to
+        # (handler, args_tuple) or None for unknown/DSP instructions.
+        # This eliminates the linear scan in Disassembler.disasm (which
+        # was ~15s of 58s in the 60s profile).
+        # -----------------------------------------------------------------
+        self._dispatch = [None] * 65536
+        self._build_dispatch_table()
+        # DSP / unknown opcode cache (filled lazily by cpu.step)
+        self._dsp_cache: Dict[int, Callable] = {}
+
+    def _build_dispatch_table(self):
+        """Precompute self._dispatch: 65536 entries of (handler, args_tuple) or None."""
+        from ruk.jcore.generated_opcodes import opcodes_table
+
+        # Pre-extract parameter names per op_id (excluding 'self').
+        # co_varnames[0] is 'self'; we want the rest in order.
+        param_order_cache: Dict[int, tuple] = {}
+
+        for op_val in range(65536):
+            # Find the matching opcode entry (first match wins, same as disasm).
+            for entry in opcodes_table:
+                op_id, fmt, mask, code, args_struct = entry
+                if op_val & mask != code:
+                    continue
+
+                # Matched.  Look up handler.
+                handler = self._resolve_table.get(op_id)
+                if handler is None:
+                    break  # unknown -> leave dispatch[op_val] as None
+
+                # Extract args into a dict (same logic as Disassembler.disasm).
+                args_dict = {}
+                for arg_name, arg_mask in args_struct.items():
+                    if arg_mask & 0b1111_1111 == 0:
+                        # 0bXXXX_0000_0000
+                        v = (op_val & arg_mask) >> 8
+                    elif arg_mask & 0b1111_0000_1111 == 0:
+                        # 0bXXXX_0000
+                        v = (op_val & arg_mask) >> 4
+                    elif arg_mask & 0b1111_0000_0000 == 0:
+                        # 0bXXXX_XXXX
+                        v = op_val & arg_mask
+                    elif arg_mask & 0b1111_0000_0000_0000 == 0:
+                        # 0bXXXX_XXXX_XXXX
+                        v = op_val & arg_mask
+                    elif arg_mask & 0b1111_1111_0000 == 0:
+                        # 0bXXXX
+                        v = op_val & arg_mask
+                    elif arg_mask & 0b1111_1000_1111 == 0:
+                        # 0b0XXX_0000
+                        v = op_val & arg_mask
+                    else:
+                        v = op_val & arg_mask
+                    args_dict[arg_name] = v
+
+                # Reorder args to match handler's parameter order.
+                # Only the *required* params (those without defaults) need
+                # to be in the args_tuple.  Params with defaults (e.g.
+                # CMPIM has `n=None` because the opcode only encodes `i`
+                # and `n` is implicitly R0) are left to use their default.
+                if op_id not in param_order_cache:
+                    code_obj = handler.__code__
+                    n_args = code_obj.co_argcount
+                    n_defaults = len(handler.__defaults__ or ())
+                    # Required params = total positional minus 'self' minus defaults.
+                    n_required = n_args - 1 - n_defaults
+                    required_names = code_obj.co_varnames[1:1 + n_required]
+                    param_order_cache[op_id] = tuple(required_names)
+                param_order = param_order_cache[op_id]
+
+                try:
+                    args_tuple = tuple(args_dict[name] for name in param_order)
+                except KeyError:
+                    # The handler's signature has a required parameter that
+                    # the opcodes_table entry doesn't provide.  This is a
+                    # real bug -- skip this entry so we can diagnose it
+                    # without crashing the whole dispatch table build.
+                    import sys
+                    print(f"[WARN] dispatch table: op_id={op_id} fmt={fmt!r} "
+                          f"args_struct={list(args_struct.keys())} "
+                          f"required_handler_params={list(param_order)} -- skipping",
+                          file=sys.stderr)
+                    break
+
+                self._dispatch[op_val] = (handler, args_tuple)
+                break
+
     def _reg(self, op_id: int, handler: Callable):
         """Register a handler in the resolve table."""
         self._resolve_table[op_id] = handler
@@ -320,6 +426,31 @@ class Emulator:
             return self._resolve_table[opcode_id]
         raise IndexError(f'OPCode index "{opcode_id}" not resolved '
                          f'(did you add it to _resolve_table?)')
+
+    def dispatch(self, op_val: int):
+        """
+        Resolve a 16-bit opcode value to its (handler, args_tuple) entry.
+
+        Returns None for opcodes that have no registered handler (e.g.
+        SH4AL-DSP instructions handled by dsp.py).  The CPU step() loop
+        handles None by falling back to the DSP / unknown-opcode path.
+
+        This replaces the old `disasm(op_val) + resolve(op_id)` two-step
+        with a single list index into the precomputed _dispatch table.
+        """
+        entry = self._dispatch[op_val]
+        if entry is not None:
+            return entry
+        # Lazy DSP / unknown-opcode handling: cache the result so we
+        # only run the DSP probe once per unique opcode value.
+        cached = self._dsp_cache.get(op_val, False)
+        if cached is False:
+            # Probe once.  We can't probe here because we don't have
+            # the cpu context for DSP state -- the CPU step() must do it.
+            # Return a sentinel that tells step() to do the probe and
+            # cache the result.
+            return _DSP_PROBE
+        return cached
 
     # ===================================================================
     # SR.T helpers
@@ -978,6 +1109,74 @@ class Emulator:
         self.cpu.regs['macl'] = _u32(a * b)
         self.cpu.pc = _u32(self.cpu.pc + 2)
 
+    def DMULS_L(self, m: int, n: int):
+        """DMULS.L Rm, Rn: signed 32x32 -> 64-bit result in MACH:MACL."""
+        a = _i32(self.cpu.regs[n])
+        b = _i32(self.cpu.regs[m])
+        prod = a * b  # Python ints are arbitrary precision
+        prod &= 0xFFFFFFFFFFFFFFFF
+        self.cpu.regs['mach'] = _u32((prod >> 32) & 0xFFFFFFFF)
+        self.cpu.regs['macl'] = _u32(prod & 0xFFFFFFFF)
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def DMULU_L(self, m: int, n: int):
+        """DMULU.L Rm, Rn: unsigned 32x32 -> 64-bit result in MACH:MACL."""
+        a = self.cpu.regs[n] & 0xFFFFFFFF
+        b = self.cpu.regs[m] & 0xFFFFFFFF
+        prod = a * b
+        self.cpu.regs['mach'] = _u32((prod >> 32) & 0xFFFFFFFF)
+        self.cpu.regs['macl'] = _u32(prod & 0xFFFFFFFF)
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def MAC_L(self, m: int, n: int):
+        """MAC.L @Rm+, @Rn+: signed 32x32 + accumulate -> MACH:MACL.
+
+        The S bit of SR controls whether the accumulator saturates at
+        48 bits (S=1) or runs free (S=0).  We implement the S=0 (non-
+        saturating) case, which is what the Casio OS uses.
+        """
+        addr_m = self.cpu.regs[m]
+        addr_n = self.cpu.regs[n]
+        a = _i32(self.cpu.mem.read32(addr_m))
+        b = _i32(self.cpu.mem.read32(addr_n))
+        self.cpu.regs[m] = _u32(addr_m + 4)
+        self.cpu.regs[n] = _u32(addr_n + 4)
+        prod = a * b
+        # Combine current MACH:MACL into a 64-bit signed accumulator
+        cur = ((self.cpu.regs['mach'] << 32) | self.cpu.regs['macl'])
+        if cur & 0x8000000000000000:
+            cur -= 0x10000000000000000
+        acc = cur + prod
+        # S=0: no saturation.  Mask to 64 bits.
+        acc &= 0xFFFFFFFFFFFFFFFF
+        self.cpu.regs['mach'] = _u32((acc >> 32) & 0xFFFFFFFF)
+        self.cpu.regs['macl'] = _u32(acc & 0xFFFFFFFF)
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def MAC_W(self, m: int, n: int):
+        """MAC.W @Rm+, @Rn+: signed 16x16 + accumulate -> MACH:MACL.
+
+        Like MAC.L but with 16-bit operands; result is sign-extended to
+        32 bits and added to MACL (with overflow into MACH if S=0).
+        """
+        addr_m = self.cpu.regs[m]
+        addr_n = self.cpu.regs[n]
+        a_raw = self.cpu.mem.read16(addr_m)
+        b_raw = self.cpu.mem.read16(addr_n)
+        a = _sext(a_raw & 0xFFFF, 16)
+        b = _sext(b_raw & 0xFFFF, 16)
+        self.cpu.regs[m] = _u32(addr_m + 2)
+        self.cpu.regs[n] = _u32(addr_n + 2)
+        prod = a * b
+        cur = ((self.cpu.regs['mach'] << 32) | self.cpu.regs['macl'])
+        if cur & 0x8000000000000000:
+            cur -= 0x10000000000000000
+        acc = cur + prod
+        acc &= 0xFFFFFFFFFFFFFFFF
+        self.cpu.regs['mach'] = _u32((acc >> 32) & 0xFFFFFFFF)
+        self.cpu.regs['macl'] = _u32(acc & 0xFFFFFFFF)
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
     def DIV0S(self, m: int, n: int):
         """DIV0S Rm, Rn: initialize for signed division."""
         sr = self.cpu.regs['sr']
@@ -1403,6 +1602,50 @@ class Emulator:
 
     def LDC_DBR(self, m: int):
         self.cpu.dbr = _u32(self.cpu.regs[m])
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    # ---- LDC/STC for R0_BANK..R7_BANK ----
+    # The opcode encodes the bank index in `n` (0-7).  We map it to
+    # the r{n}_bank name in the system-registers dict.
+    def LDC_RBANK(self, m: int, n: int):
+        """LDC Rm, Rn_BANK: load Rm into Rn_BANK (n is 0..7)."""
+        if 0 <= n < 8:
+            self.cpu.regs._sys[f'r{n}_bank'] = _u32(self.cpu.regs[m])
+            if self.cpu.regs._regs is not None:
+                self.cpu.regs._regs[f'r{n}_bank'] = _u32(self.cpu.regs[m])
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def LDCL_RBANK(self, m: int, n: int):
+        """LDC.L @Rm+, Rn_BANK: load 32-bit from memory into Rn_BANK."""
+        if 0 <= n < 8:
+            addr = self.cpu.regs[m]
+            val = self.cpu.mem.read32(addr)
+            if isinstance(val, bytes):
+                val = int.from_bytes(val, "big")
+            v = _u32(val)
+            self.cpu.regs._sys[f'r{n}_bank'] = v
+            if self.cpu.regs._regs is not None:
+                self.cpu.regs._regs[f'r{n}_bank'] = v
+            self.cpu.regs[m] = _u32(addr + 4)
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def STC_RBANK(self, m: int, n: int):
+        """STC Rm_BANK, Rn: read Rm_BANK into Rn (m is 0..7)."""
+        if 0 <= m < 8:
+            self.cpu.regs[n] = self.cpu.regs._sys[f'r{m}_bank']
+        else:
+            self.cpu.regs[n] = 0
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def STCL_RBANK(self, m: int, n: int):
+        """STC.L Rm_BANK, @-Rn: pre-decrement store of Rm_BANK."""
+        if 0 <= m < 8:
+            val = self.cpu.regs._sys[f'r{m}_bank']
+        else:
+            val = 0
+        addr = _u32(self.cpu.regs[n] - 4)
+        self.cpu.regs[n] = addr
+        self.cpu.mem.write32(addr, val)
         self.cpu.pc = _u32(self.cpu.pc + 2)
 
     # ---- LDC.L @Rm+, REG ----

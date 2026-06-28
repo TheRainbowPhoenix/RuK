@@ -196,29 +196,66 @@ class ControlsFrame(BaseFrame):
             self._refresh_callback()
             return
 
-        # Check for software breakpoints before each step
-        # (HW breakpoints are handled by the UBC in CPU.step)
-        batch_size = 500
-        for _ in range(batch_size):
-            if self._cpu.ebreak:
-                break
+        # Check for software breakpoints before starting the batch
+        if hasattr(self, '_soft_breakpoints') and self._cpu.pc in self._soft_breakpoints:
+            self._running = False
+            self.start_btn.configure(image=self.resources['start'])
+            self._refresh_callback()
+            return
 
-            # Check software breakpoints
-            if hasattr(self, '_soft_breakpoints') and self._cpu.pc in self._soft_breakpoints:
-                # Hit a software breakpoint -> pause
-                self._running = False
-                self.start_btn.configure(image=self.resources['start'])
-                self._refresh_callback()
-                return
-
+        # Use JIT-accelerated run if available; fall back to step() loop.
+        # The JIT runs in batches of max_steps_per_batch, then returns
+        # control so we can check for pause/breakpoints and refresh the GUI.
+        if hasattr(self._cpu, 'run'):
             try:
-                self._cpu.step()
+                # Run a batch of ~50K steps via JIT.  should_continue
+                # returns False if the user clicked Pause.  We check
+                # soft breakpoints after each batch.
+                # Note: peripheral ticking (RTC, CMT) is handled inside
+                # the JIT's run loop via cpu.on_step, so we don't need
+                # to pass a tick_callback here.
+                self._cpu.run_with_check(
+                    should_continue=lambda: self._running and not self._cpu.ebreak,
+                    max_steps_per_batch=50000,
+                    tick_callback=None,
+                )
             except Exception as e:
                 print(f"!!! CPU Error : {e} !!!")
                 self._running = False
                 self.start_btn.configure(image=self.resources['start'])
                 self._refresh_callback()
                 return
+
+            # Check software breakpoints after the batch
+            if hasattr(self, '_soft_breakpoints') and self._cpu.pc in self._soft_breakpoints:
+                self._running = False
+                self.start_btn.configure(image=self.resources['start'])
+                self._refresh_callback()
+                return
+        else:
+            # Fallback: step() loop (no JIT)
+            batch_size = 1000
+            
+            for _ in range(batch_size):
+                if self._cpu.ebreak:
+                    break
+
+                # Check software breakpoints
+                if hasattr(self, '_soft_breakpoints') and self._cpu.pc in self._soft_breakpoints:
+                    # Hit a software breakpoint -> pause
+                    self._running = False
+                    self.start_btn.configure(image=self.resources['start'])
+                    self._refresh_callback()
+                    return
+
+                try:
+                    self._cpu.step()
+                except Exception as e:
+                    print(f"!!! CPU Error : {e} !!!")
+                    self._running = False
+                    self.start_btn.configure(image=self.resources['start'])
+                    self._refresh_callback()
+                    return
 
         # Periodically refresh the GUI (every batch)
         self._refresh_callback()

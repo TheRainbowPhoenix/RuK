@@ -16,6 +16,7 @@ class Memory:
     def __init__(self, size):
         self._mem = bytearray(size)
         self._ptr = 0
+        self._size = size
 
     def read8(self, addr: int) -> int:
         """
@@ -27,13 +28,15 @@ class Memory:
 
     def read16(self, addr: int) -> int:
         """
-        Read 16 bits in memory (big-endian, matching the SH-4's
-        big-endian bus when the host is also big-endian-aware).
+        Read 16 bits in memory (big-endian).
         :param addr: memory addr
         :return: int in [0, 0xFFFF]
         """
-        if 0 <= addr + 2 <= len(self._mem):
-            return int.from_bytes(self._mem[addr:addr + 2], "big")
+        m = self._mem
+        if addr + 2 <= self._size:
+            # Bit-shift read is ~3x faster than int.from_bytes(slice)
+            # because it avoids creating a temporary bytes object.
+            return (m[addr] << 8) | m[addr + 1]
         raise IndexError(f'Out of bound read16 : "{addr:04X}"')
 
     def read32(self, addr: int) -> int:
@@ -42,8 +45,9 @@ class Memory:
         :param addr: memory addr
         :return: int in [0, 0xFFFFFFFF]
         """
-        if 0 <= addr + 4 <= len(self._mem):
-            return int.from_bytes(self._mem[addr:addr + 4], "big")
+        m = self._mem
+        if addr + 4 <= self._size:
+            return (m[addr] << 24) | (m[addr + 1] << 16) | (m[addr + 2] << 8) | m[addr + 3]
         raise IndexError(f'Out of bound read32 : "{addr:04X}"')
 
     def write8(self, addr, val: int) -> int:
@@ -52,15 +56,23 @@ class Memory:
 
     def write16(self, addr: int, val: int):
         """Write 16 bits (big-endian)."""
-        if 0 <= addr + 2 <= len(self._mem):
-            self._mem[addr:addr + 2] = (val & 0xFFFF).to_bytes(2, "big")
+        m = self._mem
+        if addr + 2 <= self._size:
+            v = val & 0xFFFF
+            m[addr] = (v >> 8) & 0xFF
+            m[addr + 1] = v & 0xFF
             return
         raise IndexError(f'Out of bound write16 : "{addr:04X}"')
 
     def write32(self, addr: int, val: int):
         """Write 32 bits (big-endian)."""
-        if 0 <= addr + 4 <= len(self._mem):
-            self._mem[addr:addr + 4] = (val & 0xFFFFFFFF).to_bytes(4, "big")
+        m = self._mem
+        if addr + 4 <= self._size:
+            v = val & 0xFFFFFFFF
+            m[addr]     = (v >> 24) & 0xFF
+            m[addr + 1] = (v >> 16) & 0xFF
+            m[addr + 2] = (v >> 8) & 0xFF
+            m[addr + 3] = v & 0xFF
             return
         raise IndexError(f'Out of bound write32 : "{addr:04X}"')
 
@@ -123,6 +135,12 @@ class MemoryMap:
     def __init__(self):
         self._mem = {}
         self._metas = {}
+        # Last-region cache -- most accesses hit the same region repeatedly.
+        self._cache_start = -1
+        self._cache_end = -1
+        self._cache_mem = None
+        # Precomputed sorted list of (start, end, mem) for the cold path.
+        self._regions_sorted = []
 
     def add(self, addr_start: int, memory: Memory, name: str = "-", perms: str = None):
         self._mem[addr_start] = memory
@@ -130,6 +148,16 @@ class MemoryMap:
             "perms": MemoryPermission.from_string(perms or "RWX"),
             "name": name
         }
+        # Invalidate caches -- the new region might overlap.
+        self._cache_start = -1
+        # Rebuild the sorted regions list (smallest first, so the
+        # "most specific region wins" rule is preserved).
+        rs = []
+        for start, mem in self._mem.items():
+            rs.append((start, start + len(mem), mem))
+        # Sort by size ascending so smaller (more specific) regions win.
+        rs.sort(key=lambda r: r[1] - r[0])
+        self._regions_sorted = rs
 
     def resolve(self, address: Union[int, bytearray]) -> Tuple[Memory, int]:
         """
@@ -138,42 +166,34 @@ class MemoryMap:
         This lets MMIO peripherals (small, e.g. 0x30 bytes for TMU)
         take priority over catch-all regions (large, e.g. 16MB).
         """
-        if type(address) == bytearray:
-            address = int.from_bytes(address, "big")
+        # Fast path: check the cached region first.
+        cs = self._cache_start
+        if cs <= address < self._cache_end:
+            return self._cache_mem, cs
 
-        best = None
-        best_size = float('inf')
-        for start in self._mem:
-            mem = self._mem[start]
-            mem_len = len(mem)
-            # Use < (exclusive) for the upper bound so that two adjacent
-            # regions don't overlap at the boundary.
-            if start <= address < start + mem_len:
-                if mem_len < best_size:
-                    best = (mem, start)
-                    best_size = mem_len
-        if best is not None:
-            return best
+        # Cold path: scan the precomputed (start, end, mem) list.
+        # No len() calls needed here -- ends are precomputed in add().
+        for start, end, mem in self._regions_sorted:
+            if start <= address < end:
+                # Update cache
+                self._cache_start = start
+                self._cache_end = end
+                self._cache_mem = mem
+                return mem, start
         # no memory mapped
         raise IndexError(f'Address is unmapped : {hex(address)}')
 
     def read32(self, address: int) -> int:
         mem, start = self.resolve(address)
-        if address + 3 <= start + len(mem):
-            return mem.read32(address - start)
-        raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover
+        return mem.read32(address - start)
 
     def read16(self, address: int) -> int:
         mem, start = self.resolve(address)
-        if address + 1 <= start + len(mem):
-            return mem.read16(address - start)
-        raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover
+        return mem.read16(address - start)
 
     def read8(self, address: int) -> int:
         mem, start = self.resolve(address)
-        if address <= start + len(mem):
-            return mem.read8(address - start)
-        raise IndexError(f'Address overflow : {hex(address)}')  # pragma: no cover
+        return mem.read8(address - start)
 
     def get_arround(self, address: Union[int, bytearray], size: int):
         """

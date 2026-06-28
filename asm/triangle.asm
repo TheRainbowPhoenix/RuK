@@ -30,13 +30,13 @@ mov.l prdr_addr, r14
     mov #0, r0
     mov.w r0, @r13
 
-    ! RS=0, select GRAM (0x202)
+    ! RS=0, select GRAM (0x2C)
     mov.b @r14, r0
     and #0xEF, r0
     mov.b r0, @r14
-    mov #0x02, r0
+    mov #0x00, r0
     shll8 r0
-    or #0x02, r0
+    or #0x2C, r0
     mov.w r0, @r13
 
     ! RS=1 (data mode for pixels)

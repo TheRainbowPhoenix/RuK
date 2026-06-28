@@ -63,6 +63,10 @@ def load_and_run(cpu, mem, prog, start_pc=0x8C000000, max_steps=10000000):
     off = start_pc - 0x8C000000
     for i, b in enumerate(prog):
         if off + i < len(mem._mem): mem._mem[off + i] = b
+    # Use JIT run() mode -- ~50x faster than step() loop for tight loops.
+    # Falls back to step() if run() is unavailable (old CPU versions).
+    if hasattr(cpu, 'run'):
+        return cpu.run(max_steps)
     last = 0; lc = 0
     for s in range(max_steps):
         cpu.step()
@@ -712,7 +716,6 @@ class TestViaCPU(unittest.TestCase):
         save_bmp(d, os.path.join(OUTPUT_DIR, 'r61523_color_bars.bmp'))
 
     def test_full_gradient(self):
-        return
         cpu, mem, d = make_cpu()
         prog = assemble(LCD_SETUP + """
             mov #0x01, r7
@@ -764,7 +767,6 @@ class TestViaCPU(unittest.TestCase):
         save_bmp(d, os.path.join(OUTPUT_DIR, 'r61523_full_gradient.bmp'))
 
     def test_bouncing_ball(self):
-        return
         cpu, mem, d = make_cpu()
         prog = assemble(LCD_SETUP + """
             mov #0x01, r7

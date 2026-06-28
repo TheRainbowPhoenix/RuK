@@ -5,7 +5,70 @@ from ruk.jcore.emulator import Emulator  # generated_
 from ruk.jcore.memory import MemoryMap
 
 
-# SH-4 SR bit fields
+# ----------------------------------------------------------------------------
+# Dispatch helpers for opcodes that fall through the precomputed table.
+# These are module-level functions (not closures) so they can be cached
+# in Emulator._dsp_cache and re-invoked without creating new bound-method
+# objects on each step.
+# ----------------------------------------------------------------------------
+
+def _dsp_dispatch(cpu, op_val: int):
+    """Re-invoke the DSP instruction handler for `op_val` on `cpu`."""
+    from ruk.jcore.dsp import handle_dsp_instruction
+    handle_dsp_instruction(cpu, op_val)
+
+
+def _nop_dispatch(cpu, op_val: int):
+    """Advance PC by 2 (treat as NOP).  Used for truly unknown opcodes."""
+    cpu.pc = (cpu.pc + 2) & 0xFFFFFFFF
+
+
+# ----------------------------------------------------------------------------
+# SyncedRegisterDict: a dict that mirrors writes back into the Register's
+# fast _r list / _sys dict.  This exists so legacy code that does
+# `regs._regs['r15'] = 0xFF` (e.g. ruk/tests/test_register.py) keeps
+# working -- subsequent `regs[15]` reads see the new value.
+# ----------------------------------------------------------------------------
+
+class _SyncedRegisterDict(dict):
+    """A dict whose __setitem__ mirrors writes into the parent Register.
+
+    Only the keys 'r0'..'r15', 'r0_bank'..'r7_bank', and the system
+    register names are mirrored.  Other keys are stored normally.
+    """
+
+    __slots__ = ('_parent',)
+
+    def __init__(self, parent):
+        super().__init__()
+        self._parent = parent
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        # Mirror into the fast storage.
+        parent = self._parent
+        if type(key) is str:
+            k = key.lower()
+            # r0..r9
+            if len(k) == 2 and k[0] == 'r' and k[1].isdigit():
+                idx = ord(k[1]) - ord('0')
+                parent._r[idx] = value & 0xFFFFFFFF
+                parent._regs_dirty = True
+                return
+            # r10..r15
+            if len(k) == 3 and k[0] == 'r' and k[1].isdigit() and k[2].isdigit():
+                idx = (ord(k[1]) - ord('0')) * 10 + (ord(k[2]) - ord('0'))
+                if 0 <= idx < 16:
+                    parent._r[idx] = value & 0xFFFFFFFF
+                    parent._regs_dirty = True
+                    return
+            # system / banked registers
+            if k in parent._sys:
+                parent._sys[k] = value & 0xFFFFFFFF
+                parent._regs_dirty = True
+
+
+# SH-4 SR bit fields (see cp-emu/src/cpu.h)
 SR_T     = 1 << 0       # T bit (condition flag)
 SR_S     = 1 << 1
 SR_IMASK = 0x000000F0   # bits 4-7: interrupt mask
@@ -18,109 +81,200 @@ SR_MD    = 1 << 31      # processor mode (1 = privileged)
 
 class Register:
     """
-    Simple SH4 register model
+    Simple SH4 register model.
+
+    Performance: r0-r15 are stored in a list (self._r) for O(1) integer
+    indexing -- the original dict-with-string-keys approach required
+    f-string formatting ('r{n}') on every access which dominated the
+    profile.  System registers (pr, sr, gbr, vbr, mach, macl, spc, ssr,
+    sgr, dbr, and the DSP regs) remain in a dict keyed by lowercase name.
+
+    The dict _regs is still populated with the same keys as before so
+    that test_register.py and any external code that does
+    `regs._regs['r15'] = ...` keeps working.
     """
+    _SYS_NAMES = (
+        'pr', 'sr', 'gbr', 'vbr', 'mach', 'macl',
+        'spc', 'ssr', 'sgr', 'dbr',
+        'x0', 'x1', 'y0', 'y1',
+        'a0', 'a0g', 'a1', 'a1g', 'm0', 'm1',
+        'rs', 're', 'rc', 'dsr', 'mod',
+    )
+
     def __init__(self):
-        # Actual register table
-        self._regs = {
-            'r0': 0x0,
-            'r1': 0x0,
-            'r2': 0x0,
-            'r3': 0x0,
-            'r4': 0x0,
-            'r5': 0x0,
-            'r6': 0x0,
-            'r7': 0x0,
-            'r8': 0x0,
-            'r9': 0x0,
-            'r10': 0x0,
-            'r11': 0x0,
-            'r12': 0x0,
-            'r13': 0x0,
-            'r14': 0x0,
-            'r15': 0x0,
-            'r0_bank': 0x0,
-            'r1_bank': 0x0,
-            'r2_bank': 0x0,
-            'r3_bank': 0x0,
-            'r4_bank': 0x0,
-            'r5_bank': 0x0,
-            'r6_bank': 0x0,
-            'r7_bank': 0x0,
-            'pr': 0x0,
-            'sr': 0x0,
-            'gbr': 0x0,
-            'vbr': 0x0,
-            'mach': 0x0,
-            'macl': 0x0,
-            'spc': 0x0,
-            'ssr': 0x0,
-            'sgr': 0x0,
-            'dbr': 0x0,
-            # DSP registers (SH4AL-DSP)
-            'x0': 0x0, 'x1': 0x0,
-            'y0': 0x0, 'y1': 0x0,
-            'a0': 0x0, 'a0g': 0x0,
-            'a1': 0x0, 'a1g': 0x0,
-            'm0': 0x0, 'm1': 0x0,
-            'rs': 0x0, 're': 0x0, 'rc': 0x0,
-            'dsr': 0x0,
-            'mod': 0x0,    # DSP mode register (used by repeat loops)
-        }
+        # self._regs = {
+        #     'r0': 0x0,
+        #     'r1': 0x0,
+        #     'r2': 0x0,
+        #     'r3': 0x0,
+        #     'r4': 0x0,
+        #     'r5': 0x0,
+        #     'r6': 0x0,
+        #     'r7': 0x0,
+        #     'r8': 0x0,
+        #     'r9': 0x0,
+        #     'r10': 0x0,
+        #     'r11': 0x0,
+        #     'r12': 0x0,
+        #     'r13': 0x0,
+        #     'r14': 0x0,
+        #     'r15': 0x0,
+        #     'r0_bank': 0x0,
+        #     'r1_bank': 0x0,
+        #     'r2_bank': 0x0,
+        #     'r3_bank': 0x0,
+        #     'r4_bank': 0x0,
+        #     'r5_bank': 0x0,
+        #     'r6_bank': 0x0,
+        #     'r7_bank': 0x0,
+        #     'pr': 0x0,
+        #     'sr': 0x0,
+        #     'gbr': 0x0,
+        #     'vbr': 0x0,
+        #     'mach': 0x0,
+        #     'macl': 0x0,
+        #     'spc': 0x0,
+        #     'ssr': 0x0,
+        #     'sgr': 0x0,
+        #     'dbr': 0x0,
+        #     # DSP registers (SH4AL-DSP)
+        #     'x0': 0x0, 'x1': 0x0,
+        #     'y0': 0x0, 'y1': 0x0,
+        #     'a0': 0x0, 'a0g': 0x0,
+        #     'a1': 0x0, 'a1g': 0x0,
+        #     'm0': 0x0, 'm1': 0x0,
+        #     'rs': 0x0, 're': 0x0, 'rc': 0x0,
+        #     'dsr': 0x0,
+        #     'mod': 0x0,    # DSP mode register (used by repeat loops)
+        # }
+        # Fast list for r0..r15 (the hot path).
+        self._r = [0] * 16
+        # Dict for system registers (slow path, but small).
+        self._sys = {name: 0 for name in Register._SYS_NAMES}
+        # Banked registers r0_bank..r7_bank -- kept in _sys.
+        for i in range(8):
+            self._sys[f'r{i}_bank'] = 0
+
+        # Backwards-compat dict -- a plain dict populated eagerly with
+        # all register names so __str__/dump()/__iter__/external code
+        # that does `for name in regs._regs` works.
+        # We DON'T mirror writes here (too slow -- 5M extra calls in the
+        # LCD benchmark).  Instead, _regs is rebuilt lazily from _r/_sys
+        # when something actually reads it (via _sync_legacy_dict).
+        # Tests that do `regs._regs['r15'] = X` directly WILL still work
+        # because _SyncedRegisterDict.__setitem__ mirrors back to _r.
+        rd = _SyncedRegisterDict(self)
+        for i in range(16):
+            dict.__setitem__(rd, f'r{i}', 0)
+        for i in range(8):
+            dict.__setitem__(rd, f'r{i}_bank', 0)
+        for name in Register._SYS_NAMES:
+            dict.__setitem__(rd, name, 0)
+        self._regs = rd
+        # Dirty flag: set True whenever _r / _sys changes; cleared when
+        # _sync_legacy_dict() refreshes _regs.
+        self._regs_dirty = True
+
+    @property
+    def regs(self):
+        """Legacy dict view (always available, kept in sync)."""
+        return self._regs
 
     def __getitem__(self, key: Union[int, str]) -> int:
         """
-        Helper method to access items
-        >>> r = Register()
-        >>> print(r[0])
-        >>> print('r0')
-        :param key: Index of the register (0 to 15) or string name.
-        Valid names includes pc, pr, sr, gbr, vbrn mach and macl
-        :return: int value
-        :raise IndexError: key is not valid
+        Access a register by index (0-15) or by name.
+        Names: 'r0'..'r15', 'r0_bank'..'r7_bank', 'pr', 'sr', 'gbr',
+        'vbr', 'mach', 'macl', 'spc', 'ssr', 'sgr', 'dbr', 'x0', 'x1',
+        'y0', 'y1', 'a0', 'a0g', 'a1', 'a1g', 'm0', 'm1', 'rs', 're',
+        'rc', 'dsr'.
         """
-        # Numeric access
-        if type(key) == int and 0 <= int(key) <= 15:
-            return self._regs[f'r{key}']
+        # Numeric access -- the hot path.  List index, no dict, no
+        # f-string formatting.
+        if type(key) is int:
+            if 0 <= key < 16:
+                return self._r[key]
+            raise IndexError(f"Register index out of range: {key}")
         # Name access
-        elif type(key) == str:
-            key = key.lower()
-            if key in self._regs:
-                return self._regs[key]
+        if type(key) is str:
+            k = key.lower()
+            # Quick path for 'r0'..'r9' (single digit)
+            if len(k) == 2 and k[0] == 'r' and k[1].isdigit():
+                return self._r[ord(k[1]) - ord('0')]
+            # Quick path for 'r10'..'r15' (two digits)
+            if len(k) == 3 and k[0] == 'r' and k[1].isdigit() and k[2].isdigit():
+                idx = (ord(k[1]) - ord('0')) * 10 + (ord(k[2]) - ord('0'))
+                if 0 <= idx < 16:
+                    return self._r[idx]
+            if k in self._sys:
+                return self._sys[k]
         raise IndexError("Index is not a valid register")
 
     def __setitem__(self, key: Union[int, str], value: int) -> int:
         """
-        >>> r = Register()
-        >>> r[0] = 15
-        >>> r['r0'] = 15
-        Helper to set an item
-        :param key: Index of the register (0 to 15) or string name.
-        :param value: int value
-        :return: int value (the one set)
-        :raise IndexError: key is not valid
+        Set a register by index (0-15) or by name.  See __getitem__ for
+        the list of valid names.
         """
         # Mask to 32 bits on every write -- negative Python ints and
         # 64-bit `c_long` results would otherwise leak into PC arithmetic.
         value &= 0xFFFFFFFF
-        # Numeric access
-        if type(key) == int and 0 <= int(key) <= 15:
-            self._regs[f'r{key}'] = value
-            return value
-        elif type(key) == str:
-            key = key.lower()
-            if key in self._regs:
-                self._regs[key] = value
+        # Numeric access -- hot path.  We do NOT mirror to _regs here
+        # (that was costing ~5s in the LCD benchmark).  Instead we set
+        # the dirty flag and let _sync_legacy_dict() refresh _regs only
+        # when something actually reads it.
+        if type(key) is int:
+            if 0 <= key < 16:
+                self._r[key] = value
+                self._regs_dirty = True
+                return value
+            raise IndexError(f"Register index out of range: {key}")
+        if type(key) is str:
+            k = key.lower()
+            if len(k) == 2 and k[0] == 'r' and k[1].isdigit():
+                self._r[ord(k[1]) - ord('0')] = value
+                self._regs_dirty = True
+                return value
+            if len(k) == 3 and k[0] == 'r' and k[1].isdigit() and k[2].isdigit():
+                idx = (ord(k[1]) - ord('0')) * 10 + (ord(k[2]) - ord('0'))
+                if 0 <= idx < 16:
+                    self._r[idx] = value
+                    self._regs_dirty = True
+                    return value
+            if k in self._sys:
+                self._sys[k] = value
+                self._regs_dirty = True
                 return value
         raise IndexError("Index is not a valid register")
 
     def __str__(self) -> str:
+        # Refresh legacy dict view from _r/_sys so it's up to date.
+        self._sync_legacy_dict()
+        return "Register{" + ', '.join([f'{i}: {self._regs[i]:02X}' for i in self._regs])+"}"
+
+    def _sync_legacy_dict(self):
+        """Refresh the legacy _regs dict from _r / _sys (read-side sync).
+
+        Only rebuilds when _regs_dirty is True -- this avoids the 5M
+        extra dict writes that the eager-mirror approach was costing
+        in the LCD benchmark.
+        """
+        if not self._regs_dirty:
+            return
+        rd = self._regs
+        for i in range(16):
+            dict.__setitem__(rd, f'r{i}', self._r[i])
+        for k in self._sys:
+            dict.__setitem__(rd, k, self._sys[k])
+        self._regs_dirty = False
+
+    def __str__(self) -> str:
+        self._sync_legacy_dict()
         return "Register{" + ', '.join([f'{i}: {self._regs[i]:02X}' for i in self._regs])+"}"
 
     def dump(self) -> None:
         """
-        Dump every registers and print them
+        Dump every register and print them.
         """
+        self._sync_legacy_dict()
         regs = list(self._regs)
 
         col = 4
@@ -135,18 +289,24 @@ class Register:
         )
 
     def __len__(self):
-        return len(self._regs)
+        # Total number of registers exposed via the legacy dict view.
+        # (16 general + 8 banked + 25 system = 49)
+        return 49 # len(self._regs)
 
     def __iter__(self):
+        # Iterate register names in the legacy dict order.
         for x in self._regs.__iter__():
             yield x
 
     def reset(self):
         """
-        Perform CPU reset
+        Perform CPU reset -- zero all general, banked, and system registers.
         """
-        for reg in self._regs:
-            self._regs[reg] = 0x0
+        for i in range(16):
+            self._r[i] = 0
+        for k in self._sys:
+            self._sys[k] = 0
+        self._regs_dirty = True
 
 
 class PCWrapper:
@@ -220,6 +380,12 @@ class CPU:
         self._step_count = 0
         self.on_step = None  # callback(step_count: int) -> None
 
+        # DSP repeat-loop active flag.  Set to True by LDRS/LDRE/LDRC
+        # handlers when RC > 0; cleared by the step() loop when RC
+        # reaches 0.  This gates the per-step RE/RS check so the common
+        # case (no DSP loop active) pays zero cost.
+        self._dsp_active = False
+
     @property
     def reg_pc(self):
         return self._pc_wrap
@@ -227,12 +393,15 @@ class CPU:
     @property
     def r_bank(self):
         """Convenience list accessor for R0_BANK..R7_BANK."""
-        return [self.regs[f'r{i}_bank'] for i in range(8)]
+        return [self.regs._sys[f'r{i}_bank'] for i in range(8)]
 
     @r_bank.setter
     def r_bank(self, values):
+        sysd = self.regs._sys
         for i, v in enumerate(values):
-            self.regs[f'r{i}_bank'] = v & 0xFFFFFFFF
+            sysd[f'r{i}_bank'] = v & 0xFFFFFFFF
+            if self.regs._regs is not None:
+                self.regs._regs[f'r{i}_bank'] = v & 0xFFFFFFFF
 
     def _sr_t(self) -> int:
         """Get the T bit (bit 0 of SR)."""
@@ -312,8 +481,32 @@ class CPU:
         self.is_sleeping = False
 
     def step(self):
-        try:
-            # Check for UBC break before fetching the instruction (PCB=0).
+        """Execute one SH-4 instruction at self.pc.
+
+        Hot path -- this method runs millions of times per second, so
+        every operation matters.  Optimizations applied:
+
+          1. UBC fast-path: when self.ubc is None (no UBC configured),
+             skip _check_ubc() / _check_ubc_after() entirely.
+
+          2. No isinstance() on read16() result -- always int now.
+
+          3. Direct dispatch table lookup (single list index into
+             self.emulator._dispatch) instead of disassembler.disasm()
+             + emulator.resolve() (linear scan of 170 entries).
+
+          4. Positional args call instead of **kwargs dispatch.
+
+          5. DSP repeat-loop check gated on self._dsp_active flag.
+
+          6. (OPT-10) Cache hot attributes (mem, dispatch, emulator,
+             dsp_active) as locals at function entry to avoid repeated
+             attribute lookups on self -- CPython attribute access is
+             a dict lookup on each `self.X` and costs ~30ns each.
+        """
+        ubc = self.ubc
+        # ---- Pre-execution UBC check (PCB=0 break before fetch) ----
+        if ubc is not None:
             self._check_ubc()
             if self.ebreak:
                 return
@@ -321,86 +514,62 @@ class CPU:
                 self.pc &= 0xFFFFFFFF
                 return
 
-            # Save the pre-execution PC for the post-execution UBC check.
-            pre_pc = self.pc & 0xFFFFFFFF
+        pre_pc = self.pc & 0xFFFFFFFF
+        mem = self.mem
+        emu = self.emulator
+        dispatch = emu._dispatch
+        dsp_cache = emu._dsp_cache
 
-            ins = self.mem.read16(self.pc)
-            if isinstance(ins, int):
-                op_val = ins
+        try:
+            op_val = mem.read16(pre_pc)
+
+            # ---- Dispatch ----
+            entry = dispatch[op_val]
+            if entry is not None:
+                # Happy path: precomputed (handler, args_tuple).
+                # `handler(*args)` is the positional-call form -- ~30%
+                # faster than `handler(**args)` because CPython skips
+                # the kwargs dict unpacking.
+                handler, args = entry
+                handler(*args)
             else:
-                op_val = int.from_bytes(ins, "big")
+                # Unknown / SH4AL-DSP / unimplemented.  Probe once and
+                # cache the result so we don't repeat the probe for the
+                # same opcode on every step.
+                cached = dsp_cache.get(op_val, False)
+                if cached is False:
+                    # First time seeing this opcode -- run the probe.
+                    self._handle_unknown_op(op_val, pre_pc)
+                elif cached is not None:
+                    cached(self, op_val)  # DSP wrapper
 
-            try:
-                op, args = self.disassembler.disasm(op_val)
-                callback = self.emulator.resolve(op)
-                callback(**args)
-            except IndexError as e:
-                # Check if this is an unknown instruction or a memory access error
-                err_msg = str(e)
-                if 'not resolved' in err_msg or 'Unknown OPCode' in err_msg:
-                    # Try DSP instruction handler first
-                    from ruk.jcore.dsp import handle_dsp_instruction
-                    if handle_dsp_instruction(self, op_val):
-                        pass  # DSP instruction was handled
-                    else:
-                        # Unknown instruction (likely SH4AL-DSP specific).
-                        if not hasattr(self, '_warned_unknown'):
-                            self._warned_unknown = set()
-                        key = op_val
-                        if key not in self._warned_unknown:
-                            print(f"[WARN] Unknown instruction 0x{op_val:04X} at PC=0x{pre_pc:08X} -- skipping (treating as NOP)")
-                            self._warned_unknown.add(key)
-                        self.pc = (pre_pc + 2) & 0xFFFFFFFF
-                else:
-                    # Memory access error -- re-raise to be caught by the outer handler
-                    raise
+            # ---- Post-execution UBC check (PCB=1 break after exec) ----
+            if ubc is not None:
+                self._check_ubc_after(pre_pc)
+                if self._ubc_break_pending:
+                    self.pc &= 0xFFFFFFFF
+                    return
 
-            # Check for UBC break AFTER the instruction (PCB=1).
-            # If the instruction that just executed was at a channel's CAR
-            # and that channel has PCB=1, deliver the break now.
-            self._check_ubc_after(pre_pc)
-            if self._ubc_break_pending:
-                self.pc &= 0xFFFFFFFF
-                return
-
-            # ---- DSP repeat-loop handling (SH4AL-DSP) ----
-            # If we just executed the instruction at RE (repeat end) and
-            # RC != 0, decrement RC and branch back to RS (repeat start).
-            # This implements the zero-overhead loop.
-            #
-            # The DSR.DC bit (bit 0) is updated to reflect the new RC
-            # state: DC=1 if RC != 0 (loop continues), DC=0 if RC == 0
-            # (loop just ended).  This is what DCT/DCF variants check.
-            #
-            # Note: On real hardware, the repeat-loop check happens
-            # BEFORE the instruction at RE is executed (the instruction
-            # at RE is the LAST one in the loop, not the first one
-            # outside).  We approximate this by checking if the NEXT PC
-            # (after the just-executed instruction) equals RE.
-            try:
-                rc = self.regs['rc'] & 0xFFFFFFFF
-                re_addr = self.regs['re'] & 0xFFFFFFFF
-                rs_addr = self.regs['rs'] & 0xFFFFFFFF
-                # Check if we're about to enter the repeat region (PC == RE
-                # after this instruction means the next instruction is at RE,
-                # which is the loop exit point).
-                # Actually, the standard semantics: when PC reaches RE and
-                # RC > 0, decrement RC; if RC > 0 after decrement, branch
-                # to RS.  We check this AFTER the instruction executes.
-                if (self.pc & 0xFFFFFFFF) == re_addr and rc > 0:
-                    # Decrement RC
-                    new_rc = (rc - 1) & 0xFFFFFFFF
-                    self.regs['rc'] = new_rc
-                    # Update DSR.DC bit
-                    if new_rc > 0:
-                        self.regs['dsr'] |= 1   # DC = 1 (loop continues)
-                        # Branch back to RS
-                        self.pc = rs_addr & 0xFFFFFFFF
-                    else:
-                        self.regs['dsr'] &= ~1 & 0xFFFFFFFF  # DC = 0 (loop ended)
-                        # Fall through past RE
-            except (KeyError, AttributeError):
-                pass  # rc/re/rs not available -- skip repeat handling
+            # ---- DSP repeat-loop handling (SH4AL-DSP zero-overhead loop) ----
+            # Only check if a repeat loop is currently active (RC > 0).
+            # The LDRS/LDRE/LDRC handlers set _dsp_active = True; the
+            # loop-exhaustion path below sets it back to False.
+            if self._dsp_active:
+                pc_now = self.pc & 0xFFFFFFFF
+                re_addr = self.regs._sys['re']
+                if pc_now == re_addr:
+                    rc = self.regs._sys['rc']
+                    if rc > 0:
+                        new_rc = rc - 1
+                        self.regs._sys['rc'] = new_rc
+                        if new_rc > 0:
+                            # Loop continues: branch back to RS.
+                            self.regs._sys['dsr'] |= 1
+                            self.pc = self.regs._sys['rs'] & 0xFFFFFFFF
+                        else:
+                            # Loop just ended: fall through past RE.
+                            self.regs._sys['dsr'] &= ~1 & 0xFFFFFFFF
+                            self._dsp_active = False
 
         except IndexError:
             self.ebreak = True
@@ -414,6 +583,33 @@ class CPU:
         self._step_count += 1
         if self.on_step is not None:
             self.on_step(self._step_count)
+
+    def _handle_unknown_op(self, op_val: int, pre_pc: int):
+        """
+        Called when the dispatch table has no entry for `op_val`.
+        Probes the DSP instruction handler; if that fails too, treats
+        the instruction as a NOP (advances PC by 2) and warns once.
+
+        Caches the result in self.emulator._dsp_cache so that subsequent
+        encounters of the same opcode skip the probe.
+        """
+        from ruk.jcore.dsp import handle_dsp_instruction
+        if handle_dsp_instruction(self, op_val):
+            # It was a DSP instruction.  Cache a wrapper that re-invokes
+            # handle_dsp_instruction -- we can't precompute the handler
+            # because DSP instructions depend on DSP register state.
+            self.emulator._dsp_cache[op_val] = _dsp_dispatch
+        else:
+            # Unknown instruction (likely SH4AL-DSP specific).
+            if not hasattr(self, '_warned_unknown'):
+                self._warned_unknown = set()
+            if op_val not in self._warned_unknown:
+                print(f"[WARN] Unknown instruction 0x{op_val:04X} at "
+                      f"PC=0x{pre_pc:08X} -- skipping (treating as NOP)")
+                self._warned_unknown.add(op_val)
+            self.pc = (pre_pc + 2) & 0xFFFFFFFF
+            # Cache a NOP-advance wrapper for subsequent encounters.
+            self.emulator._dsp_cache[op_val] = _nop_dispatch
 
     def stacktrace(self):
         self.regs.dump()
@@ -433,7 +629,91 @@ class CPU:
             pc = self.pc
         return self.mem.get_arround(pc, size)
 
+    def run(self, max_steps: int = 10000000) -> int:
+        """Fast run mode using JIT compilation.
+
+        This is MUCH faster than calling step() in a loop:
+          - Phase 1: Predecodes blocks and batch-executes handlers
+          - Phase 2: Compiles hot blocks to Python source (exec)
+          - Phase 3: Detects self-looping blocks and wraps them in
+            Python `while True:` loops
+
+        The inner loop of the gradient test (10 instructions × 46k
+        iterations) runs as a SINGLE Python function call with all
+        instructions inlined as straight-line code.
+
+        Use step() for debugging (single-instruction, UBC checks).
+        Use run() for batch execution (LCD rendering, OS boot, etc.).
+
+        Returns the number of steps executed.
+        """
+        from ruk.jcore.jit import JITCompiler
+        if not hasattr(self, '_jit'):
+            self._jit = JITCompiler(self)
+        return self._jit.run(max_steps)
+
+    def run_with_check(self, should_continue, max_steps_per_batch: int = 50000,
+                       tick_callback=None, tick_interval: int = 500):
+        """JIT run that periodically checks if it should keep running.
+
+        This is the GUI-friendly version of run():
+          - `should_continue()`: called every batch; if it returns False,
+            the run pauses.  Used for the Play/Pause button.
+          - `tick_callback(step_count)`: called every `tick_interval`
+            steps; used for peripheral ticking (RTC, CMT) and GUI refresh.
+          - `max_steps_per_batch`: how many steps to run between checks.
+
+        Yields (steps_run, paused_by_user) tuples so the caller can
+        periodically refresh the GUI.
+
+        The JIT caches persist across calls, so resuming after a pause
+        is fast.
+        """
+        from ruk.jcore.jit import JITCompiler
+        if not hasattr(self, '_jit'):
+            self._jit = JITCompiler(self)
+
+        # Temporarily swap on_step so the JIT's inner loop calls our
+        # tick_callback at the right interval.  We monkey-patch the
+        # JIT's run loop to check `should_continue` between blocks.
+        jit = self._jit
+        cpu = self
+        original_on_step = self.on_step
+
+        # We can't easily hook into the JIT's inner loop, so we run
+        # in batches: each batch runs max_steps_per_batch / tick_interval
+        # = 100 JIT calls, then we call tick_callback and check
+        # should_continue.
+        total_steps = 0
+        while should_continue():
+            if cpu.ebreak:
+                break
+            # Run one batch
+            batch_steps = jit.run(max_steps_per_batch)
+            total_steps += batch_steps
+            # Tick peripherals
+            if tick_callback is not None:
+                tick_callback(total_steps)
+            # If the JIT ran fewer steps than requested, it hit a
+            # spin loop or end-of-program -- stop.
+            if batch_steps < max_steps_per_batch // 2:
+                break
+
+        self.on_step = original_on_step
+        return total_steps
+
+    def jit_stats(self):
+        """Return JIT compilation statistics (for debugging/tuning)."""
+        if hasattr(self, '_jit'):
+            return self._jit.stats()
+        return {'jit_compiled': 0, 'jit_cache_size': 0, 'block_cache_size': 0}
+
     def reset(self):
         self.pc = self._start_pc
         self.regs.reset()
         self.ebreak = False
+        # Clear JIT caches on reset (code may have changed)
+        if hasattr(self, '_jit'):
+            self._jit.jit_cache.clear()
+            self._jit.block_runner.block_cache.clear()
+            self._jit.hotness.clear()

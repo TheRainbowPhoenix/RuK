@@ -261,6 +261,11 @@ class Classpad:
         return self._cpu
 
     @property
+    def mem(self):
+        """The MemoryMap (used by the hh3 loader and other helpers)."""
+        return self._memory
+
+    @property
     def ram(self):
         return self._ram
 

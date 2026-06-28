@@ -247,20 +247,26 @@ class RegisterFrame(BaseFrame):
             else:
                 self._mem_window.root.lift()
 
-        def show_lcd():
-            if self._cp is not None and self._cp.display is not None:
-                from ruk.gui.lcd_viewer import LCDViewerWindow
-                if self._lcd_window is None or not self._lcd_window.root.winfo_exists():
-                    self._lcd_window = LCDViewerWindow(self._root, self._cp.display)
-                else:
-                    self._lcd_window.root.lift()
-            else:
-                print("[LCD] No display peripheral attached")
+        # Store show_lcd as an instance attribute so external code
+        # (e.g. run_gui.py's load_hh3) can call it to open the LCD viewer.
+        self.show_lcd = self._show_lcd
 
         refresh["command"] = reload_regs
         memory_map["command"] = show_memory_map
         memory_view["command"] = show_memory_view
-        screen_view["command"] = show_lcd
+        screen_view["command"] = self.show_lcd
+
+    def _show_lcd(self):
+        """Open (or refresh) the LCD viewer window."""
+        if self._cp is not None and self._cp.display is not None:
+            from ruk.gui.lcd_viewer import LCDViewerWindow
+            if self._lcd_window is None or not self._lcd_window.root.winfo_exists():
+                self._lcd_window = LCDViewerWindow(self._root, self._cp.display)
+            else:
+                self._lcd_window._refresh()
+                self._lcd_window.root.lift()
+        else:
+            print("[LCD] No display peripheral attached")
 
     def do_refresh(self):
         for reg_name in self.regs_wrapper:
