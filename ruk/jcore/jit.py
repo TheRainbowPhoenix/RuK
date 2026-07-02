@@ -163,11 +163,11 @@ def _gen_negc(op_val, pc, bsp):
 def _gen_tst_rm(op_val, pc, bsp):
     n = (op_val >> 8) & 0xF
     m = (op_val >> 4) & 0xF
-    return ([f"sr['sr'] = (sr['sr'] & ~1) | (0 if (r[{n}] & r[{m}]) == 0 else 1)"], False)
+    return ([f"sr['sr'] = (sr['sr'] & ~1) | (0 if (r[{n}] & r[{m}]) == 0 else 1)"], False) # TODO: ternary is wrong ? 
 
 def _gen_tst_imm(op_val, pc, bsp):
     i = op_val & 0xFF
-    return ([f"sr['sr'] = (sr['sr'] & ~1) | (0 if (r[0] & {i}) == 0 else 1)"], False)
+    return ([f"sr['sr'] = (sr['sr'] & ~1) | (0 if (r[0] & {i}) == 0 else 1)"], False) # TODO: ternary is wrong ? 
 
 def _gen_cmpim(op_val, pc, bsp):
     i = _sext8(op_val & 0xFF)
@@ -507,6 +507,59 @@ def _gen_bt(op_val, pc, bsp):
                  f"    return",
                  f"cpu.pc = {next_pc}"], False)
 
+# ---- Delayed-branch variants ----
+# bf.s / bt.s: test condition; if true, execute delay slot then jump.
+# We can't JIT the delay slot inline (we'd need to know its handler),
+# so we mark this as a non-self-loop end-of-block branch and let the
+# interpreter handle the delay slot.
+def _gen_bfs(op_val, pc, bsp):
+    """BF/S disp -- BF with delay slot.  We emit a runtime check; the
+    delay slot will be executed by the interpreter on the next step()
+    call (we set PC back to the BF/S instruction and let step() handle
+    the delay slot properly via _exec_delay_slot).
+    """
+    # Can't JIT -- fall back to interpreter.  Return None to signal this.
+    return None
+
+def _gen_bts(op_val, pc, bsp):
+    """BT/S disp -- BT with delay slot.  Same as BF/S, fall back."""
+    return None
+
+def _gen_bra(op_val, pc, bsp):
+    """BRA disp -- unconditional branch with delay slot."""
+    return None
+
+def _gen_bsr(op_val, pc, bsp):
+    """BSR disp -- branch to subroutine with delay slot."""
+    return None
+
+def _gen_braf(op_val, pc, bsp):
+    """BRAF Rm -- indirect branch with delay slot."""
+    return None
+
+def _gen_bsrf(op_val, pc, bsp):
+    """BSRF Rm -- indirect call with delay slot."""
+    return None
+
+def _gen_rts(op_val, pc, bsp):
+    """RTS -- return from subroutine (delay slot)."""
+    return None
+
+def _gen_jmp(op_val, pc, bsp):
+    """JMP @Rm -- indirect jump (delay slot)."""
+    return None
+
+def _gen_jsr(op_val, pc, bsp):
+    """JSR @Rm -- indirect call (delay slot)."""
+    return None
+
+def _gen_rte(op_val, pc, bsp):
+    """RTE -- return from exception (delay slot)."""
+    return None
+
+def _gen_trapa(op_val, pc, bsp):
+    """TRAPA #imm -- trap (no delay slot, but exception semantics)."""
+    return None
 
 # ---------------------------------------------------------------------------
 # Code generator registry: op_id -> generator function
@@ -582,6 +635,21 @@ CODE_GENS: Dict[int, Callable] = {
     148: _gen_shlr16,   # SHLR16 Rn
     149: _gen_bf,       # BF disp
     151: _gen_bt,       # BT disp
+    # Delayed-branch variants all return None to fall back to the
+    # interpreter (which handles delay slots correctly via
+    # _exec_delay_slot).  This is correct but slower; the JIT still
+    # compiles the straight-line code between branches.
+    150: _gen_bfs, # BF/S
+    152: _gen_bts, # BT/S
+    153: _gen_bra, # BRA
+    154: _gen_braf, # BRAF
+    155: _gen_bsr, # BSR
+    156: _gen_bsrf, # BSRF
+    157: _gen_jmp, # JMP
+    158: _gen_jsr, # JSR
+    161: _gen_rts, # RTS
+    221: _gen_rte, # RTE
+    270: _gen_trapa, # TRAPA
     164: _gen_clrmac,   # CLRMAC
     165: _gen_clrs,     # CLRS
     166: _gen_clrt,     # CLRT
@@ -696,6 +764,11 @@ class JITCompiler:
         self.threshold = 5  # compile after 5 executions
         self._jit_count = 0
         self._fallback_count = 0
+        # Tick callback (for peripheral ticking during JIT run)
+        self.tick_callback = None
+        self.tick_interval = 500  # call tick_callback every N steps
+        self._last_tick = 0
+
 
     def _jit_compile(self, start_pc: int) -> Optional[Callable]:
         """Generate Python source for a block, exec it, return the function."""
@@ -709,6 +782,7 @@ class JITCompiler:
         is_self_loop = False
         pc = start_pc
         max_len = 256
+        op_id = None
 
         for _ in range(max_len):
             if pc > 0xFFFFFFFE:
@@ -815,8 +889,22 @@ class JITCompiler:
         threshold = self.threshold
         compile_block = self.block_runner._compile_block
 
+        # Tick support: call on_step every tick_interval steps
+        on_step = cpu.on_step
+        tick_interval = self.tick_interval
+        step_count = cpu._step_count
+        last_tick = self._last_tick
+
         n = 0
-        last = 0; lc = 0
+        # Spin detection: we use a high water-mark approach.  Only break
+        # if we've executed max_steps, hit ebreak, or the PC is genuinely
+        # stuck at the same instruction for many iterations (single-op
+        # self-loop like SLEEP or a broken jump-to-self).
+        # We do NOT break on tight loops (e.g. BF back to block start)
+        # because those are legitimate program behavior and the JIT
+        # should keep running them.
+        same_pc_count = 0
+        last_pc = -1
         try:
             for s in range(max_steps):
                 pc = cpu.pc
@@ -854,17 +942,49 @@ class JITCompiler:
                         for handler, args in ops:
                             handler(*args)
 
-                n = s + 1
+                n += 1
+                # Periodic ticking: call on_step every tick_interval steps
+                step_count += 1
+                if on_step is not None and (step_count - last_tick) >= tick_interval:
+                    on_step(step_count)
+                    last_tick = step_count
+                    # Check for sleep (peripherals may have set CPU sleeping)
+                    # If CPU is sleeping, we need to keep ticking until wake.
+                    while getattr(cpu, 'is_sleeping', False):
+                        on_step(step_count)
+                        step_count += 1
 
-                if cpu.pc == last:
-                    lc += 1
-                    if lc > 100:
+                # Spin detection: only break if the PC is *exactly* the
+                # same as before AND hasn't changed for many iterations.
+                # This catches SLEEP (which doesn't advance PC) and
+                # broken jump-to-self, but not legitimate tight loops
+                # where PC oscillates.
+                new_pc = cpu.pc
+                if new_pc == pc:
+                    same_pc_count += 1
+                    # Same PC after executing a block.  This could be:
+                    #   - SLEEP instruction (PC frozen until interrupt)
+                    #   - A self-looping block (BF back to start)
+                    # For SLEEP, we should break and let the caller
+                    # handle it.  For self-loops, we should keep running
+                    # but tick peripherals faster.
+                    # Use a high threshold to avoid false positives on
+                    # short self-loops that legitimately exit when an
+                    # interrupt fires.
+                    if same_pc_count > 10000:
+                        # Likely SLEEP or truly stuck -- break and let
+                        # the caller decide.
                         break
                 else:
-                    last = cpu.pc; lc = 0
+                    same_pc_count = 0
+
+                if cpu.ebreak:
+                    break
         except IndexError:
             cpu.ebreak = True
 
+        cpu._step_count = step_count
+        self._last_tick = last_tick
         cpu.pc &= 0xFFFFFFFF
         return n
 

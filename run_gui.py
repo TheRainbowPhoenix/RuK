@@ -36,7 +36,7 @@ def main():
     cp = Classpad(rom, debug=False, start_pc=project.start_pc,
                   with_tmu=project.with_tmu, with_rtc=project.with_rtc,
                   with_dma=project.with_dma, with_display=project.with_display,
-                  with_ubc=project.with_ubc)
+                  with_ubc=project.with_ubc, with_touch=project.with_touch)
 
     # Override SR
     cp.cpu.regs['sr'] = project.sr_value

@@ -118,9 +118,10 @@ class NewProjectDialog(ModalWindow):
         self._dma_var = tk.BooleanVar(value=True)
         self._disp_var = tk.BooleanVar(value=True)
         self._ubc_var = tk.BooleanVar(value=True)
+        self._touch_var = tk.BooleanVar(value=True)
         for i, (txt, var) in enumerate([("TMU", self._tmu_var), ("RTC", self._rtc_var),
                                          ("DMA", self._dma_var), ("Display", self._disp_var),
-                                         ("UBC", self._ubc_var)]):
+                                         ("UBC", self._ubc_var), ("Touch", self._touch_var)]):
             ttk.Checkbutton(pf, text=txt, variable=var).grid(row=0, column=i, padx=6)
         row += 1
 
@@ -189,6 +190,7 @@ class NewProjectDialog(ModalWindow):
         self._dma_var.set(p.with_dma)
         self._disp_var.set(p.with_display)
         self._ubc_var.set(p.with_ubc)
+        self._touch_var.set(getattr(p, 'with_touch', True))
         self._current_addins = list(p.addins)
         for a in self._current_addins:
             self._addin_list.insert('', tk.END, values=(a.path, f"0x{a.load_addr:08X}", a.description))
@@ -288,6 +290,7 @@ class NewProjectDialog(ModalWindow):
             with_dma=self._dma_var.get(),
             with_display=self._disp_var.get(),
             with_ubc=self._ubc_var.get(),
+            with_touch=self._touch_var.get(),
             is_assembly=bool(self._asm_var.get().strip()),
         )
 
@@ -496,7 +499,7 @@ class OpenAddinDialog(ModalWindow):
             start_pc=parsed['e_entry'],  # addin entry point
             sr_value=0x80000000,    # MD=1 (privileged)
             with_tmu=True, with_rtc=True, with_dma=True,
-            with_display=True, with_ubc=True,
+            with_display=True, with_ubc=True, with_touch=True,
             hh3_path=hh3,           # signal to run_gui.py to load via ELF loader
         )
         self._top.destroy()

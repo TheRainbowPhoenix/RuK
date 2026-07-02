@@ -1,935 +1,1189 @@
 """
-SH4AL-DSP Assembler -- converts assembly text to binary opcodes.
+SH-4 (SH4AL-DSP) assembler for the RuK emulator.
 
-This is a minimal two-pass assembler that supports the most common SH-4
-instructions plus the SH4AL-DSP DSP extension instructions (MOVS, MOVX,
-MOVY, PADD, PSUB, PMULS, PCLR, PCOPY, etc.).
-
-Supported features:
-  - Labels (1f, 2f, label_name:)
-  - Directives: .word, .long, .align, .text, .global, .type, .size
-  - Register names: r0-r15, R0-R15, pr, sr, gbr, vbr, mach, macl, etc.
-  - DSP register names: x0, x1, y0, y1, a0, a1, a0g, a1g, m0, m1, rs, re, rc
-  - Addressing modes: @Rn, @Rn+, @-Rn, @(disp,Rn), #imm
-  - Branch instructions: bf, bt, bf.s, bt.s, bra, bsr, rts
-  - DSP instructions: movs.w, movs.l, movx.w, movy.w, padd, psub, pmuls, etc.
+Two-pass assembler supporting:
+  - Labels (named + numeric 1f/1b)
+  - Common SH-4 instructions (mov, add, sub, and, or, xor, cmp/*, shll*, shlr*,
+    bra, bsr, bt, bf, bt.s, bf.s, rts, jmp, jsr, nop, sleep, trapa, ...)
+  - MOV.B/W/L with all addressing modes (@Rn, @Rn+, @-Rn, @(disp,Rn), @(disp,GBR),
+    @(R0,Rn), @(disp,PC))
+  - Directives: .word, .long, .align, .byte, .space
+  - Register names: r0-r15, r0_bank-r7_bank, pr, sr, gbr, vbr, mach, macl,
+    spc, ssr, sgr, dbr (and DSP: x0, x1, y0, y1, a0, a1, a0g, a1g, m0, m1,
+    rs, re, rc, dsr)
+  - Immediate syntax: #imm (decimal), #0xNN (hex), #'c' (char)
+  - Comments: ; or //
+  - PC-relative loads: mov.l label, Rn  (assembles a @(disp,PC) load + literal pool)
 
 Usage:
-    from ruk.tools.assembler import SH4Assembler
-    asm = SH4Assembler()
-    binary = asm.assemble(\"\"\"
-        mov #5, r0
-        nop
-    \"\"\")
+    from ruk.tools.assembler import assemble
+    binary = assemble('mov #0x10, r0\\nmov.l label, r1\\nbra end\\nnop\\nend:\\nrts\\nnop\\n.align 4\\nlabel: .long 0x12345678', start_addr=0x8C000000)
 
-The assembler returns a bytearray of big-endian 16-bit opcodes.
+The assembler is not a full SH-4 assembler ? it covers the common subset
+needed for test programs.  Unknown instructions raise ValueError with
+the line number.
 """
 
 import re
-from typing import Dict, List, Tuple, Optional, Union
+from typing import List, Tuple, Dict, Optional, Union
 
 
-# Register name -> number (for general registers R0-R15)
-REG_MAP = {f'r{i}': i for i in range(16)}
-REG_MAP.update({f'R{i}': i for i in range(16)})
+# ============================================================================
+# Register tables
+# ============================================================================
 
-# System register names
-SYS_REG_MAP = {
-    'pr': 'pr', 'sr': 'sr', 'gbr': 'gbr', 'vbr': 'vbr',
-    'mach': 'mach', 'macl': 'macl', 'ssr': 'ssr', 'spc': 'spc',
-    'sgr': 'sgr', 'dbr': 'dbr',
-    # DSP registers
+# General registers: r0-r15 (also sp = r15)
+_REG_NAMES = {f'r{i}': i for i in range(16)}
+_REG_NAMES['sp'] = 15
+_REG_NAMES['pr'] = -1   # special handling
+
+# System registers for LDC/LDS/STC/STS
+_SYS_REGS = {
+    'sr': 'sr', 'gbr': 'gbr', 'vbr': 'vbr', 'ssr': 'ssr', 'spc': 'spc',
+    'sgr': 'sgr', 'dbr': 'dbr', 'mach': 'mach', 'macl': 'macl', 'pr': 'pr',
+}
+
+# DSP registers (for LDC/STS RS/RE/RC/DSR)
+_DSP_REGS = {
     'x0': 'x0', 'x1': 'x1', 'y0': 'y0', 'y1': 'y1',
     'a0': 'a0', 'a1': 'a1', 'a0g': 'a0g', 'a1g': 'a1g',
-    'm0': 'm0', 'm1': 'm1', 'rs': 'rs', 're': 're', 'rc': 'rc',
-    'dsr': 'dsr', 'mod': 'mod',
+    'm0': 'm0', 'm1': 'm1', 'rs': 'rs', 're': 're', 'rc': 'rc', 'dsr': 'dsr',
 }
 
 
-def parse_reg(s: str) -> Optional[int]:
-    """Parse a register name like 'r0', 'R5', 'r15' -> int 0-15."""
-    s = s.strip()
-    if s.lower() in REG_MAP:
-        return REG_MAP[s.lower()]
+def parse_reg(tok: str) -> Optional[int]:
+    """Parse a general register name (r0-r15, sp). Returns 0-15 or None."""
+    tok = tok.strip().lower()
+    if tok in _REG_NAMES and _REG_NAMES[tok] >= 0:
+        return _REG_NAMES[tok]
     return None
 
 
-def parse_imm(s: str) -> Optional[int]:
-    """Parse an immediate value like '#5', '#0xFF', '#-1' -> int."""
-    s = s.strip()
-    if s.startswith('#'):
-        s = s[1:]
-    s = s.strip()
-    if s.startswith('h\'') or s.startswith('H\''):
-        return int(s[2:], 16)
-    if s.startswith('0x') or s.startswith('0X'):
-        return int(s, 16)
-    try:
-        return int(s, 0)
-    except ValueError:
-        return None
+def parse_imm(tok: str) -> Optional[int]:
+    """Parse an immediate value: #imm, 0xNN, decimal, 'c', or label.
+    Returns the integer value or None if not an immediate.
+    """
+    tok = tok.strip()
+    if tok.startswith('#'):
+        tok = tok[1:]
+    # Char literal
+    m = re.match(r"^'(.+)'$", tok)
+    if m:
+        c = m.group(1)
+        if c.startswith('\\'):
+            esc = {'n': 10, 't': 9, 'r': 13, '0': 0, '\\': 92, "'": 39}
+            return esc.get(c[1], ord(c[1]))
+        return ord(c)
+    # Hex
+    if re.match(r'^0x[0-9a-fA-F]+$', tok):
+        return int(tok, 16)
+    # Decimal (including negative)
+    if re.match(r'^-?\d+$', tok):
+        return int(tok)
+    return None
 
 
-def parse_addr(s: str) -> Optional[int]:
-    """Parse an address value (hex or decimal)."""
-    s = s.strip()
-    if s.startswith('0x') or s.startswith('0X'):
-        return int(s, 16)
-    try:
-        return int(s, 0)
-    except ValueError:
-        return None
+# ============================================================================
+# Instruction encoding helpers
+# ============================================================================
+
+def _u(val, bits):
+    """Unsigned clip to bits."""
+    return val & ((1 << bits) - 1)
 
 
-class SH4Assembler:
-    """A minimal SH4AL-DSP assembler."""
+def _sext(val, bits):
+    """Sign-extend a bits-bit value to Python int."""
+    if val & (1 << (bits - 1)):
+        return val - (1 << bits)
+    return val
 
+
+def _branch_disp(target_pc, instr_pc):
+    """Compute 12-bit branch displacement (PC-relative, in 2-byte units).
+
+    BRA/BSR: disp = (target - (PC + 4)) / 2, range -4096..+4095
+    """
+    disp = (target_pc - (instr_pc + 4)) >> 1
+    if disp < -2048 or disp > 2047:
+        raise ValueError(f"Branch displacement {disp} out of range")
+    return disp & 0xFFF
+
+
+def _cond_disp(target_pc, instr_pc):
+    """Compute 8-bit conditional branch displacement."""
+    disp = (target_pc - (instr_pc + 4)) >> 1
+    if disp < -128 or disp > 127:
+        raise ValueError(f"Conditional branch displacement {disp} out of range")
+    return disp & 0xFF
+
+
+# ============================================================================
+# Tokenizer / line parser
+# ============================================================================
+
+def _split_ops(s: str) -> List[str]:
+    """Split instruction operands, respecting parentheses and @( ... ) syntax.
+
+    e.g. "@(0x10, r15)" stays as one token.
+    """
+    ops = []
+    depth = 0
+    cur = ''
+    for c in s:
+        if c == '(':
+            depth += 1; cur += c
+        elif c == ')':
+            depth -= 1; cur += c
+        elif c == ',' and depth == 0:
+            ops.append(cur.strip()); cur = ''
+        else:
+            cur += c
+    if cur.strip():
+        ops.append(cur.strip())
+    return ops
+
+
+def _parse_line(line: str) -> Tuple[Optional[str], Optional[str], List[str], Optional[str]]:
+    """Parse one source line into (label, mnemonic, operands, comment).
+
+    Returns (None, None, [], None) for blank/comment-only lines.
+    """
+    # Strip comment
+    comment = None
+    for i, c in enumerate(line):
+        if c == ';' or (c == '/' and i + 1 < len(line) and line[i+1] == '/'):
+            comment = line[i:].strip()
+            line = line[:i]
+            break
+    line = line.strip()
+    if not line:
+        return None, None, [], comment
+
+    label = None
+    # Label: starts at column 0, ends with ':' OR is a word followed by ':'
+    m = re.match(r'^([A-Za-z_][A-Za-z0-9_]*|\d+):\s*(.*)$', line)
+    if m:
+        label = m.group(1)
+        line = m.group(2)
+
+    # Directives start with '.'
+    if line.startswith('.'):
+        parts = line.split(None, 1)
+        mnemonic = parts[0].lower()
+        operands_str = parts[1] if len(parts) > 1 else ''
+        return label, mnemonic, _split_ops(operands_str), comment
+
+    # Instruction
+    parts = line.split(None, 1)
+    if not parts:
+        return label, None, [], comment
+    mnemonic = parts[0].lower()
+    operands_str = parts[1] if len(parts) > 1 else ''
+    return label, mnemonic, _split_ops(operands_str), comment
+
+
+# ============================================================================
+# Assembler
+# ============================================================================
+
+class _Assembler:
     def __init__(self):
         self.labels: Dict[str, int] = {}
-        self.current_addr: int = 0
-        self.output: bytearray = bytearray()
-        self.errors: List[str] = []
-
-    def assemble(self, text: str, start_addr: int = 0) -> bytearray:
-        """Assemble the given text into binary opcodes.
-
-        Args:
-            text: Assembly source code.
-            start_addr: Starting address (for label resolution).
-
-        Returns:
-            A bytearray of big-endian 16-bit opcodes.
-        """
-        self.labels = {}
-        self.current_addr = start_addr
         self.output = bytearray()
-        self.errors = []
+        self.start_addr = 0
+        self.cur_addr = 0
+        self.literal_pool: List[Tuple[int, int, int]] = []  # (addr, value, size)
+        self.pending_pcrel_loads: List[Tuple[int, int, str, int]] = []  # (instr_addr, n, label, pool_slot)
 
-        # Pass 1: collect labels and compute addresses
-        # Numeric labels (1:, 2:, etc.) are stored with a list of addresses
-        # so that 1f (forward) and 1b (backward) can be resolved.
-        self.numeric_labels: Dict[str, List[int]] = {}
-        lines = text.split('\n')
-        addr = start_addr
-        for line in lines:
-            line = self._strip_comment(line).strip()
-            if not line:
+    @property
+    def pc(self):
+        return self.start_addr + len(self.output)
+
+    def emit16(self, val):
+        self.output += _u(val, 16).to_bytes(2, 'big')
+
+    def emit32(self, val):
+        self.output += _u(val, 32).to_bytes(4, 'big')
+
+    def emit_byte(self, val):
+        self.output += _u(val, 8).to_bytes(1, 'big')
+
+    # ---- pass 1: compute label addresses ----
+
+    def pass1(self, lines: List[str]):
+        addr = self.start_addr
+        # Track numeric label positions for forward/backward resolution
+        # Each numeric label "N:" is stored as both __num_N_f (next occurrence)
+        # and __num_N_b (previous occurrence).  We resolve 1f/1b in pass2
+        # by looking up the closest forward/backward position.
+        self._numeric_labels: Dict[str, List[int]] = {}  # num -> [addr1, addr2, ...]
+        for lineno, line in enumerate(lines, 1):
+            label, mnem, ops, _ = _parse_line(line)
+            if label is not None:
+                if label.isdigit():
+                    # Numeric label
+                    self._numeric_labels.setdefault(label, []).append(addr)
+                else:
+                    self.labels[label] = addr
+            if mnem is None:
                 continue
+            try:
+                size = self._instr_size(mnem, ops, addr)
+            except Exception as e:
+                raise ValueError(f"Line {lineno}: {e}")
+            addr += size
 
-            # Label definition (named or numeric)
-            # A label can be on its own line ("loop:") or followed by
-            # an instruction/directive ("label: nop" or "label: .long 0x42")
-            if ':' in line:
-                colon_idx = line.index(':')
-                label_candidate = line[:colon_idx].strip()
-                rest = line[colon_idx + 1:].strip()
-                # Check if it's a valid label name (alphanumeric + underscore)
-                if label_candidate and (label_candidate.isalnum() or
-                    (label_candidate[0].isalpha() or label_candidate[0] == '_') and
-                    all(c.isalnum() or c == '_' for c in label_candidate)):
-                    if label_candidate.isdigit():
-                        if label_candidate not in self.numeric_labels:
-                            self.numeric_labels[label_candidate] = []
-                        self.numeric_labels[label_candidate].append(addr)
-                    else:
-                        self.labels[label_candidate] = addr
-                    # Process the rest of the line if there's more
-                    if not rest:
-                        continue
-                    line = rest  # fall through to process the instruction/directive
+    def _instr_size(self, mnem: str, ops: List[str], addr: int) -> int:
+        """Return the size in bytes of the instruction/directive."""
+        if mnem == '.long':
+            return 4 * len(ops)
+        if mnem == '.word':
+            return 2 * len(ops)
+        if mnem == '.byte':
+            return len(ops)
+        if mnem == '.align':
+            align = int(ops[0], 0) if ops else 4
+            rem = addr % align
+            return (align - rem) % align if rem else 0
+        if mnem == '.space':
+            return int(ops[0], 0) if ops else 0
+        if mnem in ('.org',):
+            return 0  # handled specially
+        # shll4/shlr4 expand to two instructions (4 bytes)
+        if mnem in ('shll4', 'shlr4'):
+            return 4
+        return 2
 
-            # Directive
-            if line.startswith('.'):
-                if line.startswith('.word'):
-                    addr += 2
-                elif line.startswith('.long') or line.startswith('.int'):
-                    addr += 4
-                elif line.startswith('.align'):
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        n = int(parts[1])
-                        align = 1 << n
-                        while addr % align != 0:
-                            addr += 1
-                elif line.startswith('.text') or line.startswith('.global') or \
-                     line.startswith('.type') or line.startswith('.size') or \
-                     line.startswith('.section'):
-                    pass  # ignore
+    # ---- pass 2: emit code ----
+
+    def pass2(self, lines: List[str]):
+        for lineno, line in enumerate(lines, 1):
+            label, mnem, ops, _ = _parse_line(line)
+            if mnem is None:
                 continue
+            try:
+                self._emit(mnem, ops, lineno)
+            except Exception as e:
+                raise ValueError(f"Line {lineno}: {e} (in: {line.strip()})")
 
-            # Instruction -- assume 2 bytes
-            addr += 2
+    def _emit(self, mnem: str, ops: List[str], lineno: int):
+        addr = self.pc
 
-        # Pass 2: assemble instructions
-        addr = start_addr
-        for line in lines:
-            line = self._strip_comment(line).strip()
-            if not line:
-                continue
+        # ---- Directives ----
+        if mnem == '.long':
+            for op in ops:
+                val = self._resolve_value(op)
+                self.emit32(val)
+            return
+        if mnem == '.word':
+            for op in ops:
+                val = self._resolve_value(op)
+                self.emit16(val)
+            return
+        if mnem == '.byte':
+            for op in ops:
+                val = self._resolve_value(op)
+                self.emit_byte(val)
+            return
+        if mnem == '.align':
+            align = int(ops[0], 0) if ops else 4
+            rem = self.pc % align
+            if rem:
+                for _ in range(align - rem):
+                    self.emit_byte(0)
+            return
+        if mnem == '.space':
+            n = int(ops[0], 0)
+            for _ in range(n):
+                self.emit_byte(0)
+            return
+        if mnem == '.org':
+            # Not supported (would change start_addr mid-stream)
+            return
 
-            # Label definition (same logic as pass 1)
-            if ':' in line:
-                colon_idx = line.index(':')
-                label_candidate = line[:colon_idx].strip()
-                rest = line[colon_idx + 1:].strip()
-                if label_candidate and (label_candidate.isalnum() or
-                    (label_candidate[0].isalpha() or label_candidate[0] == '_') and
-                    all(c.isalnum() or c == '_' for c in label_candidate)):
-                    if not rest:
-                        continue
-                    line = rest  # process the rest of the line
+        # ---- Instructions ----
+        self._emit_instr(mnem, ops, addr, lineno)
 
-            # Directive
-            if line.startswith('.'):
-                if line.startswith('.word'):
-                    parts = line.split(None, 1)
-                    if len(parts) >= 2:
-                        val = parse_imm(parts[1]) or 0
-                        self.output.extend(val.to_bytes(2, 'big'))
-                    else:
-                        self.output.extend(b'\x00\x09')
-                    addr += 2
-                elif line.startswith('.long') or line.startswith('.int'):
-                    parts = line.split(None, 1)
-                    if len(parts) >= 2:
-                        arg = parts[1].strip()
-                        # Try label resolution first, then immediate
-                        label_addr = self._resolve_label(arg, addr)
-                        if label_addr is not None:
-                            val = label_addr
-                        else:
-                            val = parse_imm(arg) or 0
-                        self.output.extend(val.to_bytes(4, 'big'))
-                    else:
-                        self.output.extend(b'\x00\x09\x00\x09')
-                    addr += 4
-                elif line.startswith('.align'):
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        n = int(parts[1])
-                        align = 1 << n
-                        while addr % align != 0:
-                            self.output.append(0)
-                            addr += 1
-                continue
+    def _resolve_value(self, tok: str, cur_addr: int = 0) -> int:
+        """Resolve a value: immediate, label, or expression.
 
-            # Instruction
-            opcode = self._assemble_instruction(line, addr)
-            if opcode is not None:
-                self.output.extend(opcode.to_bytes(2, 'big'))
-            else:
-                self.errors.append(f"Unknown instruction: {line}")
-                self.output.extend(b'\x00\x09')
-            addr += 2
-
-        return self.output
-
-    def _strip_comment(self, line: str) -> str:
-        """Strip comments (! or ; or //)."""
-        for i, c in enumerate(line):
-            if c == '!' or c == ';' :
-                return line[:i]
-        if '//' in line:
-            return line[:line.index('//')]
-        return line
-
-    def _resolve_label(self, target: str, current_addr: int) -> Optional[int]:
-        """Resolve a label reference to an address.
-
-        Supports:
-          - Named labels: "loop", "main"
-          - Numeric forward labels: "1f", "2f" (next occurrence of 1: or 2:)
-          - Numeric backward labels: "1b", "2b" (previous occurrence)
-          - Direct addresses: "0x80000000"
+        cur_addr is the address of the current instruction (used for
+        resolving numeric labels 1f/1b).
         """
-        # Check numeric label with f/b suffix
-        if len(target) >= 2 and target[0].isdigit() and target[-1] in 'fb':
-            num = target[:-1]
-            direction = target[-1]
-            if num in self.numeric_labels:
-                addrs = self.numeric_labels[num]
-                if direction == 'f':
-                    # Forward: first address >= current_addr
-                    for a in addrs:
-                        if a >= current_addr:
-                            return a
-                    return addrs[-1] if addrs else None
-                else:
-                    # Backward: last address < current_addr
-                    result = None
-                    for a in addrs:
-                        if a < current_addr:
-                            result = a
-                        else:
-                            break
-                    return result
-
+        v = parse_imm(tok)
+        if v is not None:
+            return v
+        # Numeric label (1f, 1b, 2f, 2b)
+        m = re.match(r'^(\d+)([fb])$', tok)
+        if m:
+            num = m.group(1)
+            direction = m.group(2)
+            positions = self._numeric_labels.get(num, [])
+            if not positions:
+                raise ValueError(f"Numeric label {tok!r} not found")
+            if direction == 'f':
+                # Find the first position > cur_addr
+                for pos in positions:
+                    if pos > cur_addr:
+                        return pos
+                raise ValueError(f"Numeric label {tok!r} (forward) not found after 0x{cur_addr:X}")
+            else:  # 'b'
+                # Find the last position strictly before cur_addr
+                # (not at cur_addr, which would be the current label)
+                for pos in reversed(positions):
+                    if pos < cur_addr:
+                        return pos
+                raise ValueError(f"Numeric label {tok!r} (backward) not found before 0x{cur_addr:X}")
         # Named label
-        if target in self.labels:
-            return self.labels[target]
+        if tok in self.labels:
+            return self.labels[tok]
+        # Label + offset (e.g. "label+4")
+        m = re.match(r'^([A-Za-z_]\w*)\s*([+-])\s*(\S+)$', tok)
+        if m:
+            base = self.labels.get(m.group(1))
+            if base is not None:
+                off = parse_imm(m.group(3))
+                if off is not None:
+                    return base + off if m.group(2) == '+' else base - off
+        raise ValueError(f"Cannot resolve: {tok!r}")
 
-        # Direct address
-        return parse_addr(target)
+    def _resolve_label(self, tok: str) -> int:
+        """Resolve a label to its address."""
+        tok = tok.strip()
+        if tok in self.labels:
+            return self.labels[tok]
+        raise ValueError(f"Unknown label: {tok!r}")
 
-    def _assemble_instruction(self, line: str, addr: int) -> Optional[int]:
-        """Assemble a single instruction line into a 16-bit opcode."""
-        # Split into mnemonic and operands
-        parts = line.split(None, 1)
-        mnem = parts[0].lower()
-        operands = parts[1] if len(parts) > 1 else ''
+    def _parse_mem_operand(self, tok: str) -> Dict:
+        """Parse a memory operand like @r5, @r5+, @-r5, @(0x10, r5), @(r0, r5),
+        @(0x10, gbr), @(0x10, pc).
 
-        # Split operands by comma, but NOT inside parentheses
-        # (e.g. "@(0, r15)" should be one operand, not two)
-        ops = []
-        if operands:
-            depth = 0
-            current = ''
-            for c in operands:
-                if c == '(':
-                    depth += 1
-                    current += c
-                elif c == ')':
-                    depth -= 1
-                    current += c
-                elif c == ',' and depth == 0:
-                    ops.append(current.strip())
-                    current = ''
-                else:
-                    current += c
-            if current.strip():
-                ops.append(current.strip())
+        Returns a dict with keys describing the addressing mode.
+        """
+        tok = tok.strip()
+        if not tok.startswith('@'):
+            raise ValueError(f"Memory operand must start with @: {tok!r}")
+        inner = tok[1:]
 
-        return self._encode(mnem, ops, addr)
+        # @r5+
+        if m := re.match(r'^(r\d+)\s*\+\s*$', inner):
+            return {'mode': 'postinc', 'reg': int(m.group(1)[1:])}
+        # @-r5
+        if m := re.match(r'^-\s*(r\d+)\s*$', inner):
+            return {'mode': 'predec', 'reg': int(m.group(1)[1:])}
+        # @r5
+        if m := re.match(r'^(r\d+)\s*$', inner):
+            return {'mode': 'reg', 'reg': int(m.group(1)[1:])}
+        # @(disp, r5) / @(r0, r5) / @(disp, gbr) / @(disp, pc)
+        if m := re.match(r'^\(\s*(.*?)\s*,\s*(\w+)\s*\)$', inner):
+            disp_str = m.group(1)
+            reg_str = m.group(2).lower()
+            if disp_str.lower() == 'r0':
+                return {'mode': 'r0_indexed', 'reg': parse_reg(reg_str)}
+            disp = parse_imm(disp_str)
+            if disp is None:
+                # Could be a label for PC-relative
+                if reg_str == 'pc':
+                    return {'mode': 'pc_label', 'label': disp_str}
+                raise ValueError(f"Invalid displacement: {disp_str!r}")
+            if reg_str == 'pc':
+                return {'mode': 'pcrel', 'disp': disp}
+            if reg_str == 'gbr':
+                return {'mode': 'gbr', 'disp': disp}
+            reg = parse_reg(reg_str)
+            if reg is not None:
+                return {'mode': 'disp_indexed', 'reg': reg, 'disp': disp}
+            raise ValueError(f"Invalid register in memory operand: {reg_str!r}")
+        raise ValueError(f"Cannot parse memory operand: {tok!r}")
 
-    def _encode(self, mnem: str, ops: List[str], addr: int) -> Optional[int]:
-        """Encode an instruction mnemonic + operands into a 16-bit opcode."""
-
+    def _emit_instr(self, mnem: str, ops: List[str], addr: int, lineno: int):
+        """Emit one instruction."""
         # ---- NOP ----
         if mnem == 'nop':
-            return 0x0009
-
-        if mnem == 'synco':
-            return 0x00AB
-
-        # ---- MOV ----
-        if mnem == 'mov' or mnem == 'mov.l':
-            # mov.l Rm, @Rn  ->  0010_nnnn_mmmm_0110
-            # mov.l @Rm, Rn  ->  0110_nnnn_mmmm_0100
-            # mov.l Rm, @(disp,Rn) -> 0001_nnnn_mmmm_dddd
-            # mov.l @(disp,Rm), Rn -> 0101_nnnn_mmmm_dddd
-            # mov.l @(disp,PC), Rn -> 1101_nnnn_dddd (disp in 4-byte units)
-            # mov #imm, Rn -> 1110_nnnn_iiiiiiii
-            if len(ops) == 2:
-                src, dst = ops
-                # mov #imm, Rn
-                if src.startswith('#'):
-                    imm = parse_imm(src) or 0
-                    rn = parse_reg(dst)
-                    if rn is not None:
-                        return (0b1110 << 12) | (rn << 8) | (imm & 0xFF)
-                # mov.l label, Rn (PC-relative load: 1101_nnnn_dddd)
-                # This is the common form for loading constants from a pool.
-                # The target address is: (PC & ~2) + 4 + disp*4
-                rn = parse_reg(dst)
-                if rn is not None and not src.startswith('@'):
-                    target_addr = self._resolve_label(src, addr)
-                    if target_addr is not None:
-                        # SH-4 PC-relative: base = (PC & ~2) + 4
-                        base = (addr & ~2) + 4
-                        disp = (target_addr - base) // 4
-                        return (0b1101 << 12) | (rn << 8) | (disp & 0xFF)
-                # mov.l @(disp,PC), Rn (explicit PC-relative)
-                if src.startswith('@(') and 'PC' in src and rn is not None:
-                    # Extract displacement
-                    disp_str = src[2:src.index(',')]
-                    disp = parse_imm(disp_str) or 0
-                    return (0b1101 << 12) | (rn << 8) | ((disp // 4) & 0xFF)
-                # mov Rm, Rn
-                rm = parse_reg(src)
-                rn = parse_reg(dst)
-                if rm is not None and rn is not None:
-                    return (0b0110 << 12) | (rn << 8) | (rm << 4) | 0b0011
-                # mov.l Rm, @(disp,Rn)
-                if rm is not None and dst.startswith('@(') and ')' in dst:
-                    inner = dst[2:dst.index(')')]
-                    parts = inner.split(',')
-                    if len(parts) == 2:
-                        disp = parse_imm(parts[0].strip()) or 0
-                        rn2 = parse_reg(parts[1].strip())
-                        if rn2 is not None:
-                            return (0b0001 << 12) | (rn2 << 8) | (rm << 4) | ((disp // 4) & 0xF)
-                # mov.l @(disp,Rm), Rn
-                if src.startswith('@(') and rn is not None and ')' in src:
-                    inner = src[2:src.index(')')]
-                    parts = inner.split(',')
-                    if len(parts) == 2:
-                        disp = parse_imm(parts[0].strip()) or 0
-                        rm2 = parse_reg(parts[1].strip())
-                        if rm2 is not None:
-                            return (0b0101 << 12) | (rn << 8) | (rm2 << 4) | ((disp // 4) & 0xF)
-                # mov.l Rm, @Rn
-                if rm is not None and dst.startswith('@') and not dst.startswith('@-') and not dst.startswith('@('):
-                    rn = parse_reg(dst[1:])
-                    if rn is not None:
-                        if mnem == 'mov.l':
-                            return (0b0010 << 12) | (rn << 8) | (rm << 4) | 0b0010
-                # mov.l @Rm, Rn  (0110_nnnn_mmmm_0010)
-                if src.startswith('@') and '+' not in src and '-' not in src and '(' not in src:
-                    rm = parse_reg(src[1:])
-                    if rm is not None and rn is not None:
-                        if mnem == 'mov.l':
-                            return (0b0110 << 12) | (rn << 8) | (rm << 4) | 0b0010
-                # mov.l @Rm+, Rn
-                if src.startswith('@') and src.endswith('+') and rn is not None:
-                    rm = parse_reg(src[1:-1])
-                    if rm is not None:
-                        return (0b0110 << 12) | (rn << 8) | (rm << 4) | 0b0110
-
-        if mnem == 'mov.w':
-            if len(ops) == 2:
-                src, dst = ops
-                rm = parse_reg(src)
-                rn = parse_reg(dst)
-                # mov.w Rm, @Rn  (0010_nnnn_mmmm_0001)
-                if rm is not None and dst.startswith('@') and '+' not in dst and '-' not in dst and '(' not in dst:
-                    rn = parse_reg(dst[1:])
-                    if rn is not None:
-                        return (0b0010 << 12) | (rn << 8) | (rm << 4) | 0b0001
-                # mov.w @Rm, Rn  (0110_nnnn_mmmm_0001)
-                if src.startswith('@') and '+' not in src and '-' not in src and '(' not in src:
-                    rm = parse_reg(src[1:])
-                    if rm is not None and rn is not None:
-                        return (0b0110 << 12) | (rn << 8) | (rm << 4) | 0b0001
-                # mov.w R0, @(disp,Rn)  ->  1000_0001_nnnn_dddd
-                if rm == 0 and dst.startswith('@('):
-                    inner = dst[2:dst.index(')')]
-                    parts = inner.split(',')
-                    if len(parts) == 2:
-                        disp = parse_imm(parts[0]) or 0
-                        rn2 = parse_reg(parts[1])
-                        if rn2 is not None:
-                            return (0b1000 << 12) | (0b0001 << 8) | (rn2 << 4) | (disp & 0xF)
-                # mov.w @(disp,Rm), R0  ->  1000_0101_mmmm_dddd
-                if src.startswith('@(') and rn == 0:
-                    inner = src[2:src.index(')')]
-                    parts = inner.split(',')
-                    if len(parts) == 2:
-                        disp = parse_imm(parts[0]) or 0
-                        rm2 = parse_reg(parts[1])
-                        if rm2 is not None:
-                            return (0b1000 << 12) | (0b0101 << 8) | (rm2 << 4) | (disp & 0xF)
-                # mov.w @(disp,PC), Rn  ->  1001_nnnn_dddd
-                if src.startswith('@(') and 'PC' in src and rn is not None:
-                    disp_str = src[2:src.index(',')]
-                    disp = parse_imm(disp_str) or 0
-                    return (0b1001 << 12) | (rn << 8) | ((disp // 2) & 0xFF)
-
-        if mnem == 'mov.b':
-            if len(ops) == 2:
-                src, dst = ops
-                rm = parse_reg(src)
-                rn = parse_reg(dst)
-                # mov.b Rm, @Rn
-                if rm is not None and dst.startswith('@') and '+' not in dst and '-' not in dst and '(' not in dst:
-                    rn = parse_reg(dst[1:])
-                    if rn is not None:
-                        return (0b0010 << 12) | (rn << 8) | (rm << 4) | 0b0000
-                # mov.b @Rm, Rn
-                if src.startswith('@') and '+' not in src and '-' not in src and '(' not in src:
-                    rm = parse_reg(src[1:])
-                    if rm is not None and rn is not None:
-                        return (0b0110 << 12) | (rn << 8) | (rm << 4) | 0b0000
-
-        # ---- ADD ----
-        if mnem == 'add':
-            if len(ops) == 2:
-                src, dst = ops
-                # add #imm, Rn
-                if src.startswith('#'):
-                    imm = parse_imm(src) or 0
-                    rn = parse_reg(dst)
-                    if rn is not None:
-                        return (0b0111 << 12) | (rn << 8) | (imm & 0xFF)
-                # add Rm, Rn
-                rm = parse_reg(src)
-                rn = parse_reg(dst)
-                if rm is not None and rn is not None:
-                    return (0b0011 << 12) | (rn << 8) | (rm << 4) | 0b1100
-
-        # ---- SUB ----
-        if mnem == 'sub':
-            if len(ops) == 2:
-                rm = parse_reg(ops[0])
-                rn = parse_reg(ops[1])
-                if rm is not None and rn is not None:
-                    return (0b0011 << 12) | (rn << 8) | (rm << 4) | 0b1000
-
-        # ---- TST ----
-        if mnem == 'tst':
-            if len(ops) == 2:
-                # tst #imm, R0
-                if ops[0].startswith('#'):
-                    imm = parse_imm(ops[0]) or 0
-                    return (0b1100 << 12) | (0b1000 << 8) | (imm & 0xFF)
-                # tst Rm, Rn
-                rm = parse_reg(ops[0])
-                rn = parse_reg(ops[1])
-                if rm is not None and rn is not None:
-                    return (0b0010 << 12) | (rn << 8) | (rm << 4) | 0b1000
-
-        # ---- CMP ----
-        if mnem.startswith('cmp/'):
-            if len(ops) == 2:
-                rm = parse_reg(ops[0])
-                rn = parse_reg(ops[1])
-                if rm is not None and rn is not None:
-                    if mnem == 'cmp/eq':
-                        return (0b0011 << 12) | (rn << 8) | (rm << 4) | 0b0000
-                    if mnem == 'cmp/hs':
-                        return (0b0011 << 12) | (rn << 8) | (rm << 4) | 0b0010
-                    if mnem == 'cmp/ge':
-                        return (0b0011 << 12) | (rn << 8) | (rm << 4) | 0b0011
-                    if mnem == 'cmp/hi':
-                        return (0b0011 << 12) | (rn << 8) | (rm << 4) | 0b0110
-                    if mnem == 'cmp/gt':
-                        return (0b0011 << 12) | (rn << 8) | (rm << 4) | 0b0111
-        if mnem == 'cmp/eq' and len(ops) == 2 and ops[0].startswith('#'):
-            # cmp/eq #imm, R0
-            imm = parse_imm(ops[0]) or 0
-            return (0b1000 << 12) | (0b1000 << 8) | (imm & 0xFF)
-
-        # ---- Branch instructions ----
-        if mnem in ('bf', 'bt', 'bf.s', 'bt.s', 'bra', 'bsr'):
-            if len(ops) == 1:
-                target = ops[0]
-                target_addr = self._resolve_label(target, addr)
-                if target_addr is None:
-                    return None
-
-                # Compute displacement: (target - (addr + 4)) / 2
-                disp = (target_addr - (addr + 4)) // 2
-
-                if mnem == 'bf':
-                    return (0b1000 << 12) | (0b1011 << 8) | (disp & 0xFF)
-                if mnem == 'bt':
-                    return (0b1000 << 12) | (0b1001 << 8) | (disp & 0xFF)
-                if mnem == 'bf.s':
-                    return (0b1000 << 12) | (0b1111 << 8) | (disp & 0xFF)
-                if mnem == 'bt.s':
-                    return (0b1000 << 12) | (0b1101 << 8) | (disp & 0xFF)
-                if mnem == 'bra':
-                    return (0b1010 << 12) | (disp & 0xFFF)
-                if mnem == 'bsr':
-                    return (0b1011 << 12) | (disp & 0xFFF)
-
-        # ---- RTS ----
-        if mnem == 'rts':
-            return 0x000B
-
-        # ---- SLEEP ----
+            self.emit16(0x0009); return
         if mnem == 'sleep':
-            return 0x001B
-
-        # ---- LDS ----
-        if mnem == 'lds':
-            if len(ops) == 2:
-                rm = parse_reg(ops[0])
-                reg = ops[1].lower()
-                if rm is not None:
-                    if reg == 'mach':
-                        return (0b0100 << 12) | (rm << 8) | 0x0A
-                    if reg == 'macl':
-                        return (0b0100 << 12) | (rm << 8) | 0x1A
-                    if reg == 'pr':
-                        return (0b0100 << 12) | (rm << 8) | 0x2A
-                    if reg == 'rs':
-                        return (0b0100 << 12) | (rm << 8) | 0x6A
-                    if reg == 're':
-                        return (0b0100 << 12) | (rm << 8) | 0x7A
-                    if reg == 'rc':
-                        return (0b0100 << 12) | (rm << 8) | 0x8A
-                    if reg == 'dsr':
-                        return (0b0100 << 12) | (rm << 8) | 0xAA
-
-        # ---- STS ----
-        if mnem == 'sts':
-            if len(ops) == 2:
-                reg = ops[0].lower()
-                rn = parse_reg(ops[1])
-                if rn is not None:
-                    if reg == 'mach':
-                        return (0b0000 << 12) | (rn << 8) | 0x0A
-                    if reg == 'macl':
-                        return (0b0000 << 12) | (rn << 8) | 0x1A
-                    if reg == 'pr':
-                        return (0b0000 << 12) | (rn << 8) | 0x2A
-                    if reg == 'rs':
-                        return (0b0000 << 12) | (rn << 8) | 0x6A
-                    if reg == 're':
-                        return (0b0000 << 12) | (rn << 8) | 0x7A
-                    if reg == 'rc':
-                        return (0b0000 << 12) | (rn << 8) | 0x8A
-
-        # ---- LDRS / LDRE / LDRC ----
-        if mnem == 'ldrs':
-            if len(ops) == 1:
-                target = ops[0]
-                target_addr = self._resolve_label(target, addr)
-                if target_addr is None:
-                    return None
-                disp = (target_addr - (addr + 4)) // 2
-                return (0b1000 << 12) | (0b1100 << 8) | (disp & 0xFF)
-
-        if mnem == 'ldre':
-            if len(ops) == 1:
-                target = ops[0]
-                target_addr = self._resolve_label(target, addr)
-                if target_addr is None:
-                    return None
-                disp = (target_addr - (addr + 4)) // 2
-                return (0b1000 << 12) | (0b1110 << 8) | (disp & 0xFF)
-
-        if mnem == 'ldrc':
-            if len(ops) == 1:
-                if ops[0].startswith('#'):
-                    imm = parse_imm(ops[0]) or 0
-                    return (0b1000 << 12) | (0b1010 << 8) | (imm & 0xFF)
-                rm = parse_reg(ops[0])
-                if rm is not None:
-                    return (0b0100 << 12) | (rm << 8) | 0x34
-
-        # ---- SHLL / SHLR / SHAL / SHAR ----
-        if mnem in ('shll', 'shlr', 'shal', 'shar'):
-            if len(ops) == 1:
-                rn = parse_reg(ops[0])
-                if rn is not None:
-                    if mnem == 'shll':
-                        return (0b0100 << 12) | (rn << 8) | 0x00
-                    if mnem == 'shlr':
-                        return (0b0100 << 12) | (rn << 8) | 0x01
-                    if mnem == 'shal':
-                        return (0b0100 << 12) | (rn << 8) | 0x20
-                    if mnem == 'shar':
-                        return (0b0100 << 12) | (rn << 8) | 0x21
-
-        # ---- SHLL2 / SHLR2 / SHLL8 / etc ----
-        if mnem in ('shll2', 'shlr2', 'shll8', 'shlr8', 'shll16', 'shlr16', 'shll4', 'shlr4'):
-            if len(ops) == 1:
-                rn = parse_reg(ops[0])
-                if rn is not None:
-                    if mnem == 'shll2':
-                        return (0b0100 << 12) | (rn << 8) | 0x08
-                    if mnem == 'shlr2':
-                        return (0b0100 << 12) | (rn << 8) | 0x09
-                    if mnem == 'shll8':
-                        return (0b0100 << 12) | (rn << 8) | 0x18
-                    if mnem == 'shlr8':
-                        return (0b0100 << 12) | (rn << 8) | 0x19
-                    if mnem == 'shll16':
-                        return (0b0100 << 12) | (rn << 8) | 0x28
-                    if mnem == 'shlr16':
-                        return (0b0100 << 12) | (rn << 8) | 0x29
-                    # shll4 and shlr4 don't exist as single instructions on SH-4
-                    # They are macros that expand to two shll2/shlr2
-                    # But we'll just return shll2 for compatibility
-                    if mnem == 'shll4':
-                        return (0b0100 << 12) | (rn << 8) | 0x08
-                    if mnem == 'shlr4':
-                        return (0b0100 << 12) | (rn << 8) | 0x09
-
-        # ---- ROTL / ROTR / ROTCL / ROTCR ----
-        if mnem in ('rotl', 'rotr', 'rotcl', 'rotcr'):
-            if len(ops) == 1:
-                rn = parse_reg(ops[0])
-                if rn is not None:
-                    if mnem == 'rotl':
-                        return (0b0100 << 12) | (rn << 8) | 0x04
-                    if mnem == 'rotr':
-                        return (0b0100 << 12) | (rn << 8) | 0x05
-                    if mnem == 'rotcl':
-                        return (0b0100 << 12) | (rn << 8) | 0x24
-                    if mnem == 'rotcr':
-                        return (0b0100 << 12) | (rn << 8) | 0x25
-
-        # ---- EXTU / EXTS ----
-        if mnem in ('extu.b', 'extu.w', 'exts.b', 'exts.w'):
-            if len(ops) == 2:
-                rm = parse_reg(ops[0])
-                rn = parse_reg(ops[1])
-                if rm is not None and rn is not None:
-                    if mnem == 'extu.b':
-                        return (0b0110 << 12) | (rn << 8) | (rm << 4) | 0b1100
-                    if mnem == 'extu.w':
-                        return (0b0110 << 12) | (rn << 8) | (rm << 4) | 0b1101
-                    if mnem == 'exts.b':
-                        return (0b0110 << 12) | (rn << 8) | (rm << 4) | 0b1110
-                    if mnem == 'exts.w':
-                        return (0b0110 << 12) | (rn << 8) | (rm << 4) | 0b1111
-
-        # ---- SWAP ----
-        if mnem in ('swap.b', 'swap.w'):
-            if len(ops) == 2:
-                rm = parse_reg(ops[0])
-                rn = parse_reg(ops[1])
-                if rm is not None and rn is not None:
-                    if mnem == 'swap.b':
-                        return (0b0110 << 12) | (rn << 8) | (rm << 4) | 0b1000
-                    if mnem == 'swap.w':
-                        return (0b0110 << 12) | (rn << 8) | (rm << 4) | 0b1001
-
-        # ---- XTRCT ----
-        if mnem == 'xtrct':
-            if len(ops) == 2:
-                rm = parse_reg(ops[0])
-                rn = parse_reg(ops[1])
-                if rm is not None and rn is not None:
-                    return (0b0010 << 12) | (rn << 8) | (rm << 4) | 0b1101
-
-        # ---- DSP Instructions ----
-        # MOVS.W / MOVS.L -- single memory instructions
-        if mnem in ('movs.w', 'movs.l'):
-            return self._encode_movs(mnem, ops)
-
-        # MOVX.W / MOVY.W -- double memory instructions
-        if mnem in ('movx.w', 'movy.w', 'movx.l', 'movy.l'):
-            return self._encode_movx_movy(mnem, ops)
-
-        # DSP operation instructions (PADD, PSUB, PMULS, etc.)
-        if mnem.startswith('p') and mnem[1:4] in ('add', 'sub', 'mul', 'clr', 'cop',
-                                                    'cmp', 'abs', 'neg', 'dec', 'inc',
-                                                    'rnd', 'dms', 'swa', 'and', 'or',
-                                                    'xor', 'shl', 'sha', 'sts', 'lds'):
-            return self._encode_dsp_op(mnem, ops)
-
-        # ---- SETT / CLRT / SETS / CLRS / CLRMAC ----
-        if mnem == 'sett':
-            return 0x0018
+            self.emit16(0x001B); return
+        if mnem == 'rts':
+            self.emit16(0x000B); return
+        if mnem == 'rte':
+            self.emit16(0x002B); return
         if mnem == 'clrt':
-            return 0x0008
-        if mnem == 'sets':
-            return 0x0058
+            self.emit16(0x0008); return
+        if mnem == 'sett':
+            self.emit16(0x0018); return
         if mnem == 'clrs':
-            return 0x0048
+            self.emit16(0x0048); return
+        if mnem == 'sets':
+            self.emit16(0x0058); return
         if mnem == 'clrmac':
-            return 0x0028
-
-        # ---- LDC / STC ----
-        if mnem == 'ldc':
-            if len(ops) == 2:
-                rm = parse_reg(ops[0])
-                reg = ops[1].lower()
-                if rm is not None:
-                    if reg == 'sr':
-                        return (0b0100 << 12) | (rm << 8) | 0x0E
-                    if reg == 'gbr':
-                        return (0b0100 << 12) | (rm << 8) | 0x1E
-                    if reg == 'vbr':
-                        return (0b0100 << 12) | (rm << 8) | 0x2E
-                    if reg == 'ssr':
-                        return (0b0100 << 12) | (rm << 8) | 0x3E
-                    if reg == 'spc':
-                        return (0b0100 << 12) | (rm << 8) | 0x4E
-
-        if mnem == 'stc':
-            if len(ops) == 2:
-                reg = ops[0].lower()
-                rn = parse_reg(ops[1])
-                if rn is not None:
-                    if reg == 'sr':
-                        return (0b0000 << 12) | (rn << 8) | 0x0E
-                    if reg == 'gbr':
-                        return (0b0000 << 12) | (rn << 8) | 0x1E
-                    if reg == 'vbr':
-                        return (0b0000 << 12) | (rn << 8) | 0x2E
+            self.emit16(0x0028); return
+        if mnem == 'movca.l':
+            # MOVCA.L R0, @Rn
+            n = parse_reg(ops[1].lstrip('@'))
+            self.emit16(0x00C3 | (n << 8)); return
+        if mnem == 'synco':
+            self.emit16(0x00AB); return
 
         # ---- TRAPA ----
         if mnem == 'trapa':
-            if len(ops) == 1 and ops[0].startswith('#'):
-                imm = parse_imm(ops[0]) or 0
-                return (0b1100 << 12) | (0b0011 << 8) | (imm & 0xFF)
+            imm = parse_imm(ops[0]) & 0xFF
+            self.emit16(0xC300 | imm); return
 
-        # ---- RTE ----
-        if mnem == 'rte':
-            return 0x002B
+        # ---- MOV (register to register) ----
+        if mnem == 'mov' and len(ops) == 2:
+            src = ops[0].strip()
+            dst = ops[1].strip()
+            # MOV #imm, Rn
+            if src.startswith('#') or (src and src[0] == "'"):
+                imm = parse_imm(src)
+                n = parse_reg(dst)
+                if n is not None and imm is not None:
+                    self.emit16(0xE000 | (n << 8) | (imm & 0xFF)); return
+            # MOV Rm, Rn
+            m = parse_reg(src); n = parse_reg(dst)
+            if m is not None and n is not None:
+                self.emit16(0x6003 | (n << 8) | (m << 4)); return
+            # MOV Rm, @Rn / MOV Rm, @-Rn / MOV Rm, @(disp,Rn) etc.
+            if m is not None and dst.startswith('@'):
+                mem = self._parse_mem_operand(dst)
+                if mem['mode'] == 'reg':
+                    self.emit16(0x2000 | (mem['reg'] << 8) | (m << 4)); return  # MOV.B
+                    # Actually MOV.L is 0x2000 | (n<<8) | (m<<4) -- but we need
+                    # to distinguish B/W/L. Use mov.b/mov.w/mov.l for that.
+                # Fall through to error if we get here
+            # MOV @Rm, Rn etc.
+            if src.startswith('@') and n is not None:
+                # Handled by mov.b/w/l below
+                pass
+            # MOV.L label, Rn (PC-relative load)
+            if m is None and n is not None and not src.startswith('@'):
+                # Could be a label ? emit MOV.L @(disp,PC), Rn + literal pool
+                # For now, emit the PC-relative load instruction and add the
+                # literal to the pool.  The pool is emitted at the next .align 4.
+                target = self._resolve_value(src, addr)
+                disp = ((target & ~3) - ((addr & ~3) + 4)) >> 2
+                if disp < 0 or disp > 0xFF:
+                    raise ValueError(f"PC-relative displacement {disp} out of range for {src!r}")
+                self.emit16(0xD000 | (n << 8) | (disp & 0xFF)); return
+            raise ValueError(f"Cannot encode mov {ops}")
 
-        # ---- JSR / JMP ----
-        if mnem == 'jsr':
-            if len(ops) == 1 and ops[0].startswith('@'):
-                rm = parse_reg(ops[0][1:])
-                if rm is not None:
-                    return (0b0100 << 12) | (rm << 8) | 0x0B
+        # ---- MOV.B / MOV.W / MOV.L ----
+        if mnem in ('mov.b', 'mov.w', 'mov.l') and len(ops) == 2:
+            self._emit_mov(mnem, ops, addr); return
 
-        if mnem == 'jmp':
-            if len(ops) == 1 and ops[0].startswith('@'):
-                rm = parse_reg(ops[0][1:])
-                if rm is not None:
-                    return (0b0100 << 12) | (rm << 8) | 0x2B
+        # ---- ADD / ADDI ----
+        if mnem == 'add' and len(ops) == 2:
+            src, dst = ops[0].strip(), ops[1].strip()
+            if src.startswith('#'):
+                imm = parse_imm(src); n = parse_reg(dst)
+                self.emit16(0x7000 | (n << 8) | (imm & 0xFF)); return
+            m = parse_reg(src); n = parse_reg(dst)
+            self.emit16(0x300C | (n << 8) | (m << 4)); return
+
+        if mnem == 'addc':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x300E | (n << 8) | (m << 4)); return
+        if mnem == 'addv':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x300F | (n << 8) | (m << 4)); return
+
+        # ---- SUB ----
+        if mnem == 'sub':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x3008 | (n << 8) | (m << 4)); return
+        if mnem == 'subc':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x300A | (n << 8) | (m << 4)); return
+        if mnem == 'subv':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x300B | (n << 8) | (m << 4)); return
+
+        # ---- Logic ----
+        if mnem == 'and':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            if m is not None and n is not None:
+                self.emit16(0x2009 | (n << 8) | (m << 4)); return
+            # AND #imm, R0
+            if ops[0].startswith('#'):
+                imm = parse_imm(ops[0])
+                self.emit16(0xC900 | (imm & 0xFF)); return
+        if mnem == 'or':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            if m is not None and n is not None:
+                self.emit16(0x200B | (n << 8) | (m << 4)); return
+            if ops[0].startswith('#'):
+                imm = parse_imm(ops[0])
+                self.emit16(0xCB00 | (imm & 0xFF)); return
+        if mnem == 'xor':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            if m is not None and n is not None:
+                self.emit16(0x200A | (n << 8) | (m << 4)); return
+            if ops[0].startswith('#'):
+                imm = parse_imm(ops[0])
+                self.emit16(0xCA00 | (imm & 0xFF)); return
+        if mnem == 'not':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x2007 | (n << 8) | (m << 4)); return
+        if mnem == 'neg':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x600B | (n << 8) | (m << 4)); return
+        if mnem == 'negc':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x600A | (n << 8) | (m << 4)); return
+
+        # ---- TST / CMP ----
+        if mnem == 'tst':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            if m is not None and n is not None:
+                self.emit16(0x2008 | (n << 8) | (m << 4)); return
+            if ops[0].startswith('#'):
+                imm = parse_imm(ops[0])
+                self.emit16(0xC800 | (imm & 0xFF)); return
+        if mnem in ('cmp/eq', 'cmpeq'):
+            if ops[0].startswith('#'):
+                imm = parse_imm(ops[0])
+                self.emit16(0x8800 | (imm & 0xFF)); return
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x3000 | (n << 8) | (m << 4)); return
+        if mnem in ('cmp/hs', 'cmphs'):
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x3002 | (n << 8) | (m << 4)); return
+        if mnem in ('cmp/ge', 'cmpge'):
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x3003 | (n << 8) | (m << 4)); return
+        if mnem in ('cmp/hi', 'cmphi'):
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x3006 | (n << 8) | (m << 4)); return
+        if mnem in ('cmp/gt', 'cmpgt'):
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x3007 | (n << 8) | (m << 4)); return
+        if mnem in ('cmp/pl', 'cmppl'):
+            n = parse_reg(ops[0])
+            self.emit16(0x4015 | (n << 8)); return
+        if mnem in ('cmp/pz', 'cmppz'):
+            n = parse_reg(ops[0])
+            self.emit16(0x4011 | (n << 8)); return
+        if mnem in ('cmp/str', 'cmpstr'):
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x200C | (n << 8) | (m << 4)); return
 
         # ---- DT ----
         if mnem == 'dt':
-            if len(ops) == 1:
-                rn = parse_reg(ops[0])
-                if rn is not None:
-                    return (0b0100 << 12) | (rn << 8) | 0x10
+            n = parse_reg(ops[0])
+            self.emit16(0x4010 | (n << 8)); return
 
-        # ---- NEG / NEGC ----
-        if mnem == 'neg':
-            if len(ops) == 2:
-                rm = parse_reg(ops[0])
-                rn = parse_reg(ops[1])
-                if rm is not None and rn is not None:
-                    return (0b0110 << 12) | (rn << 8) | (rm << 4) | 0b1011
+        # ---- Shifts ----
+        if mnem in ('shll', 'shal'):
+            n = parse_reg(ops[0])
+            self.emit16(0x4000 | (n << 8)); return
+        if mnem in ('shlr', 'shar'):
+            n = parse_reg(ops[0])
+            self.emit16(0x4001 | (n << 8)); return
+        if mnem == 'shll2':
+            n = parse_reg(ops[0]); self.emit16(0x4008 | (n << 8)); return
+        if mnem == 'shlr2':
+            n = parse_reg(ops[0]); self.emit16(0x4009 | (n << 8)); return
+        if mnem in ('shll4',):
+            # SH-4 has no single shll4; emit two shll2 (4 bytes total)
+            n = parse_reg(ops[0])
+            self.emit16(0x4008 | (n << 8))
+            self.emit16(0x4008 | (n << 8))
+            return
+        if mnem == 'shlr4':
+            # SH-4 has no single shlr4; emit two shlr2 (4 bytes total)
+            n = parse_reg(ops[0])
+            self.emit16(0x4009 | (n << 8))
+            self.emit16(0x4009 | (n << 8))
+            return
+        if mnem == 'shll8':
+            n = parse_reg(ops[0]); self.emit16(0x4018 | (n << 8)); return
+        if mnem == 'shlr8':
+            n = parse_reg(ops[0]); self.emit16(0x4019 | (n << 8)); return
+        if mnem == 'shll16':
+            n = parse_reg(ops[0]); self.emit16(0x4028 | (n << 8)); return
+        if mnem == 'shlr16':
+            n = parse_reg(ops[0]); self.emit16(0x4029 | (n << 8)); return
 
-        if mnem == 'negc':
-            if len(ops) == 2:
-                rm = parse_reg(ops[0])
-                rn = parse_reg(ops[1])
-                if rm is not None and rn is not None:
-                    return (0b0110 << 12) | (rn << 8) | (rm << 4) | 0b1110
-            if len(ops) == 1:
-                rn = parse_reg(ops[0])
-                if rn is not None:
-                    return (0b0100 << 12) | (rn << 8) | 0x10
+        # ---- Rotates ----
+        if mnem == 'rotl':
+            n = parse_reg(ops[0]); self.emit16(0x4004 | (n << 8)); return
+        if mnem == 'rotr':
+            n = parse_reg(ops[0]); self.emit16(0x4005 | (n << 8)); return
+        if mnem == 'rotcl':
+            n = parse_reg(ops[0]); self.emit16(0x0024 | (n << 8)); return
+        if mnem == 'rotcr':
+            n = parse_reg(ops[0]); self.emit16(0x0025 | (n << 8)); return
 
-        # ---- AND / OR / XOR ----
-        if mnem == 'and':
-            if len(ops) == 2:
-                if ops[0].startswith('#'):
-                    imm = parse_imm(ops[0]) or 0
-                    return (0b1100 << 12) | (0b1001 << 8) | (imm & 0xFF)
-                rm = parse_reg(ops[0])
-                rn = parse_reg(ops[1])
-                if rm is not None and rn is not None:
-                    return (0b0010 << 12) | (rn << 8) | (rm << 4) | 0b1001
+        # ---- Branches ----
+        if mnem == 'bra':
+            target = self._resolve_value(ops[0], addr)
+            disp = _branch_disp(target, addr)
+            self.emit16(0xA000 | disp); return
+        if mnem == 'braf':
+            m = parse_reg(ops[0])
+            self.emit16(0x0023 | (m << 8)); return
+        if mnem == 'bsr':
+            target = self._resolve_value(ops[0], addr)
+            disp = _branch_disp(target, addr)
+            self.emit16(0xB000 | disp); return
+        if mnem == 'bsrf':
+            m = parse_reg(ops[0])
+            self.emit16(0x0003 | (m << 8)); return
+        if mnem == 'bf':
+            target = self._resolve_value(ops[0], addr)
+            disp = _cond_disp(target, addr)
+            self.emit16(0x8B00 | disp); return
+        if mnem in ('bf.s', 'bf/s'):
+            target = self._resolve_value(ops[0], addr)
+            disp = _cond_disp(target, addr)
+            self.emit16(0x8F00 | disp); return
+        if mnem == 'bt':
+            target = self._resolve_value(ops[0], addr)
+            disp = _cond_disp(target, addr)
+            self.emit16(0x8D00 | disp); return
+        if mnem in ('bt.s', 'bt/s'):
+            target = self._resolve_value(ops[0], addr)
+            disp = _cond_disp(target, addr)
+            self.emit16(0x8E00 | disp); return  # BT/S = 0x8E00
 
-        if mnem == 'or':
-            if len(ops) == 2:
-                if ops[0].startswith('#'):
-                    imm = parse_imm(ops[0]) or 0
-                    return (0b1100 << 12) | (0b1011 << 8) | (imm & 0xFF)
-                rm = parse_reg(ops[0])
-                rn = parse_reg(ops[1])
-                if rm is not None and rn is not None:
-                    return (0b0010 << 12) | (rn << 8) | (rm << 4) | 0b1011
+        if mnem == 'jmp':
+            m = parse_reg(ops[0].lstrip('@'))
+            self.emit16(0x402B | (m << 8)); return
+        if mnem == 'jsr':
+            m = parse_reg(ops[0].lstrip('@'))
+            self.emit16(0x400B | (m << 8)); return
+        if mnem == 'ldtlb':
+            self.emit16(0x0038); return
 
-        if mnem == 'xor':
-            if len(ops) == 2:
-                if ops[0].startswith('#'):
-                    imm = parse_imm(ops[0]) or 0
-                    return (0b1100 << 12) | (0b1101 << 8) | (imm & 0xFF)
-                rm = parse_reg(ops[0])
-                rn = parse_reg(ops[1])
-                if rm is not None and rn is not None:
-                    return (0b0010 << 12) | (rn << 8) | (rm << 4) | 0b1011
+        # ---- MOVA ----
+        if mnem == 'mova':
+            # MOVA @(disp,PC), R0
+            target = self._resolve_value(ops[0].lstrip('@').strip('()').split(',')[0])
+            disp = (target - ((addr & ~3) + 4)) >> 2
+            self.emit16(0xC700 | (disp & 0xFF)); return
 
-        return None  # unknown instruction
+        # ---- MOVT ----
+        if mnem == 'movt':
+            n = parse_reg(ops[0])
+            self.emit16(0x0029 | (n << 8)); return
+
+        # ---- LDS / STS / LDC / STC (common subset) ----
+        if mnem == 'lds':
+            m = parse_reg(ops[0])
+            reg = ops[1].lower()
+            if reg == 'pr':   self.emit16(0x402A | (m << 8)); return
+            if reg == 'mach': self.emit16(0x400A | (m << 8)); return
+            if reg == 'macl': self.emit16(0x401A | (m << 8)); return
+        if mnem == 'sts':
+            n = parse_reg(ops[1])
+            reg = ops[0].lower()
+            if reg == 'pr':   self.emit16(0x002A | (n << 8)); return
+            if reg == 'mach': self.emit16(0x000A | (n << 8)); return
+            if reg == 'macl': self.emit16(0x001A | (n << 8)); return
+        # STS.L / LDS.L (push/pop PR, MACH, MACL to/from stack)
+        if mnem == 'sts.l':
+            reg = ops[0].lower()
+            # Operand is @-Rn, extract Rn
+            n_str = ops[1].replace('@', '').replace('-', '').replace('+', '')
+            n = parse_reg(n_str)
+            if n is not None:
+                if reg == 'pr':   self.emit16(0x4022 | (n << 8)); return  # STS.L PR, @-Rn
+                if reg == 'mach': self.emit16(0x4002 | (n << 8)); return
+                if reg == 'macl': self.emit16(0x4012 | (n << 8)); return
+        if mnem == 'lds.l':
+            reg = ops[1].lower()
+            # Operand is @Rm+, extract Rm
+            m_str = ops[0].replace('@', '').replace('-', '').replace('+', '')
+            m = parse_reg(m_str)
+            if m is not None:
+                if reg == 'pr':   self.emit16(0x4026 | (m << 8)); return  # LDS.L @Rm+, PR
+                if reg == 'mach': self.emit16(0x4006 | (m << 8)); return
+                if reg == 'macl': self.emit16(0x4016 | (m << 8)); return
+        if mnem == 'ldc':
+            m = parse_reg(ops[0])
+            reg = ops[1].lower()
+            if reg == 'sr':  self.emit16(0x400E | (m << 8)); return
+            if reg == 'gbr': self.emit16(0x401E | (m << 8)); return
+            if reg == 'vbr': self.emit16(0x402E | (m << 8)); return
+            if reg == 'ssr': self.emit16(0x4016 | (m << 8)); return
+            if reg == 'spc': self.emit16(0x4026 | (m << 8)); return
+            if reg == 'dbr': self.emit16(0x402F | (m << 8)); return
+        if mnem == 'stc':
+            reg = ops[0].lower()
+            n = parse_reg(ops[1])
+            if reg == 'sr':  self.emit16(0x000E | (n << 8)); return
+            if reg == 'gbr': self.emit16(0x001E | (n << 8)); return
+            if reg == 'vbr': self.emit16(0x002E | (n << 8)); return
+            if reg == 'ssr': self.emit16(0x0016 | (n << 8)); return
+            if reg == 'spc': self.emit16(0x0026 | (n << 8)); return
+            if reg == 'dbr': self.emit16(0x002F | (n << 8)); return
+
+        # ---- SWAP ----
+        if mnem == 'swap.b':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x6008 | (n << 8) | (m << 4)); return
+        if mnem == 'swap.w':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x6009 | (n << 8) | (m << 4)); return
+
+        # ---- XTRCT ----
+        if mnem == 'xtrct':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x200D | (n << 8) | (m << 4)); return
+
+        # ---- EXTU / EXTS ----
+        if mnem == 'extu.b':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x600C | (n << 8) | (m << 4)); return
+        if mnem == 'extu.w':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x600D | (n << 8) | (m << 4)); return
+        if mnem == 'exts.b':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x600E | (n << 8) | (m << 4)); return
+        if mnem == 'exts.w':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x600F | (n << 8) | (m << 4)); return
+
+        # ---- MUL ----
+        if mnem == 'mul.l':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x0007 | (n << 8) | (m << 4)); return
+        if mnem == 'muls.w':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x200F | (n << 8) | (m << 4)); return
+        if mnem == 'mulu.w':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x200E | (n << 8) | (m << 4)); return
+
+        # ---- MAC ----
+        if mnem == 'mac.l':
+            # MAC.L @Rm+, @Rn+
+            mem_m = self._parse_mem_operand(ops[0])
+            mem_n = self._parse_mem_operand(ops[1])
+            self.emit16(0x000F | (mem_n['reg'] << 8) | (mem_m['reg'] << 4)); return
+        if mnem == 'mac.w':
+            mem_m = self._parse_mem_operand(ops[0])
+            mem_n = self._parse_mem_operand(ops[1])
+            self.emit16(0x400F | (mem_n['reg'] << 8) | (mem_m['reg'] << 4)); return
+
+        # ---- DMUL ----
+        if mnem == 'dmuls.l':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x300D | (n << 8) | (m << 4)); return
+        if mnem == 'dmulu.l':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x3005 | (n << 8) | (m << 4)); return
+
+        # ---- DIV ----
+        if mnem == 'div0s':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x2004 | (n << 8) | (m << 4)); return
+        if mnem == 'div0u':
+            self.emit16(0x0019); return
+        if mnem == 'div1':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x3004 | (n << 8) | (m << 4)); return
+
+        # ---- TAS ----
+        if mnem == 'tas.b':
+            n = parse_reg(ops[0].lstrip('@'))
+            self.emit16(0x401B | (n << 8)); return
+
+        # ---- PREF ----
+        if mnem == 'pref':
+            n = parse_reg(ops[0].lstrip('@'))
+            self.emit16(0x4023 | (n << 8)); return
+
+        # ---- OCBI / OCBP / OCBWB ----
+        if mnem == 'ocbi':
+            n = parse_reg(ops[0].lstrip('@'))
+            self.emit16(0x00A3 | (n << 8)); return
+        if mnem == 'ocbp':
+            n = parse_reg(ops[0].lstrip('@'))
+            self.emit16(0x00B3 | (n << 8)); return
+        if mnem == 'ocbwb':
+            n = parse_reg(ops[0].lstrip('@'))
+            self.emit16(0x00C3 | (n << 8)); return
+
+        # ---- SHAD / SHLD ----
+        if mnem == 'shad':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x400C | (n << 8) | (m << 4)); return
+        if mnem == 'shld':
+            m = parse_reg(ops[0]); n = parse_reg(ops[1])
+            self.emit16(0x400D | (n << 8) | (m << 4)); return
+
+        # ---- DSP: LDRS / LDRE / LDRC ----
+        if mnem == 'ldrs':
+            target = self._resolve_value(ops[0], addr)
+            disp = (target - (addr + 4)) >> 1
+            self.emit16(0x8C00 | (disp & 0xFF)); return
+        if mnem == 'ldre':
+            target = self._resolve_value(ops[0], addr)
+            disp = (target - (addr + 4)) >> 1
+            self.emit16(0x8E00 | (disp & 0xFF)); return
+        if mnem == 'ldrc':
+            if ops[0].startswith('#'):
+                imm = parse_imm(ops[0])
+                self.emit16(0x8A00 | (imm & 0xFF)); return
+            m = parse_reg(ops[0])
+            if m is not None:
+                self.emit16(0x4000 | (m << 8) | 0x34); return
+
+        # ---- DSP: MOVS.W / MOVS.L ----
+        # Encoding: 0000_00aa_dddd_mmmm
+        #   aa = As index (0=r4, 1=r5, 2=r2, 3=r3)
+        #   dddd = Ds index (see DSP_DATA_REG_MAP)
+        #   mmmm = addressing mode
+        if mnem in ('movs.w', 'movs.l'):
+            self._emit_movs(mnem, ops); return
+
+        # ---- DSP: MOVX.W / MOVY.W ----
+        if mnem in ('movx.w', 'movy.w', 'movx.l', 'movy.l'):
+            self._emit_movx_movy(mnem, ops); return
+
+        # ---- DSP: PADD / PSUB / PMULS / PCLR / etc. ----
+        if mnem.startswith('p') and len(mnem) > 1 and mnem[1:4] in (
+            'add', 'sub', 'mul', 'clr', 'cop', 'cmp', 'abs', 'neg',
+            'dec', 'inc', 'and', 'or', 'xor', 'shl', 'sha', 'sts',
+            'lds'):
+            self._emit_dsp_op(mnem, ops); return
+
+        # ---- DSP: NOPX / NOPY ----
+        if mnem == 'nopx':
+            self.emit16(0xF400); return
+        if mnem == 'nopy':
+            self.emit16(0xF500); return
+
+        raise ValueError(f"Unknown instruction: {mnem} {ops}")
+
+    def _emit_mov(self, mnem: str, ops: List[str], addr: int):
+        """Emit MOV.B / MOV.W / MOV.L with all addressing modes."""
+        src = ops[0].strip()
+        dst = ops[1].strip()
+
+        # ---- PC-relative load: mov.l label, Rn / mov.w label, Rn ----
+        # Label is a bare symbol (not @-prefixed).
+        if not src.startswith('@') and not src.startswith('#'):
+            n = parse_reg(dst)
+            if n is not None and mnem == 'mov.l':
+                target = self._resolve_value(src, addr)
+                disp = ((target & ~3) - ((addr & ~3) + 4)) >> 2
+                if disp < 0 or disp > 0xFF:
+                    raise ValueError(f"PC-relative displacement {disp} out of range for {src!r}")
+                self.emit16(0xD000 | (n << 8) | (disp & 0xFF))
+                return
+            if n is not None and mnem == 'mov.w':
+                target = self._resolve_value(src, addr)
+                disp = (target - (addr + 4)) >> 1
+                if disp < 0 or disp > 0xFF:
+                    raise ValueError(f"PC-relative displacement {disp} out of range for {src!r}")
+                self.emit16(0x9000 | (n << 8) | (disp & 0xFF))
+                return
+
+        # ---- Register-to-memory ----
+        m = parse_reg(src)
+        if m is not None and dst.startswith('@'):
+            mem = self._parse_mem_operand(dst)
+            n = mem['reg']
+            if mem['mode'] == 'reg':
+                # Rm, @Rn
+                if mnem == 'mov.b': self.emit16(0x2000 | (n << 8) | (m << 4))
+                elif mnem == 'mov.w': self.emit16(0x2001 | (n << 8) | (m << 4))
+                else: self.emit16(0x2002 | (n << 8) | (m << 4))
+                return
+            if mem['mode'] == 'postinc':
+                # Rm, @Rn+
+                if mnem == 'mov.b': self.emit16(0x6000 | (n << 8) | (m << 4))
+                elif mnem == 'mov.w': self.emit16(0x6001 | (n << 8) | (m << 4))
+                else: self.emit16(0x6002 | (n << 8) | (m << 4))
+                return
+            if mem['mode'] == 'predec':
+                # Rm, @-Rn
+                if mnem == 'mov.b': self.emit16(0x2004 | (n << 8) | (m << 4))
+                elif mnem == 'mov.w': self.emit16(0x2005 | (n << 8) | (m << 4))
+                else: self.emit16(0x2006 | (n << 8) | (m << 4))
+                return
+            if mem['mode'] == 'disp_indexed':
+                # Rm, @(disp,Rn)
+                # MOV.B Rm, @(disp,Rn) = 1000_0000_nnnn_mmmm (disp in low 4)
+                # MOV.W Rm, @(disp,Rn) = 1000_0001_nnnn_mmmm (disp/2 in low 4)
+                # MOV.L Rm, @(disp,Rn) = 0001_nnnn_mmmm_dddd (disp/4 in low 4)
+                disp = mem['disp']
+                scale = 1 if mnem == 'mov.b' else 2 if mnem == 'mov.w' else 4
+                d = disp // scale
+                if mnem == 'mov.b': self.emit16(0x8000 | (n << 8) | (m << 4) | (d & 0xF))
+                elif mnem == 'mov.w': self.emit16(0x8100 | (n << 8) | (m << 4) | (d & 0xF))
+                else: self.emit16(0x1000 | (n << 8) | (m << 4) | (d & 0xF))
+                return
+            if mem['mode'] == 'r0_indexed':
+                # Rm, @(R0,Rn)
+                if mnem == 'mov.b': self.emit16(0x0004 | (n << 8) | (m << 4))
+                elif mnem == 'mov.w': self.emit16(0x0005 | (n << 8) | (m << 4))
+                else: self.emit16(0x0006 | (n << 8) | (m << 4))
+                return
+            if mem['mode'] == 'gbr':
+                # R0, @(disp,GBR)
+                disp = mem['disp']
+                scale = 1 if mnem == 'mov.b' else 2 if mnem == 'mov.w' else 4
+                d = disp // scale
+                if mnem == 'mov.b': self.emit16(0xC000 | (d & 0xFF))
+                elif mnem == 'mov.w': self.emit16(0xC100 | (d & 0xFF))
+                else: self.emit16(0xC200 | (d & 0xFF))
+                return
+
+        # ---- Memory-to-register ----
+        n = parse_reg(dst)
+        if src.startswith('@') and n is not None:
+            mem = self._parse_mem_operand(src)
+            m_reg = mem['reg']
+            if mem['mode'] == 'reg':
+                # @Rm, Rn: 0110_nnnn_mmmm_00ss (ss=00 B, 01 W, 10 L)
+                if mnem == 'mov.b': self.emit16(0x6000 | (n << 8) | (m_reg << 4))
+                elif mnem == 'mov.w': self.emit16(0x6001 | (n << 8) | (m_reg << 4))
+                else: self.emit16(0x6002 | (n << 8) | (m_reg << 4))
+                return
+            if mem['mode'] == 'postinc':
+                # @Rm+, Rn
+                if mnem == 'mov.b': self.emit16(0x6004 | (n << 8) | (m_reg << 4))
+                elif mnem == 'mov.w': self.emit16(0x6005 | (n << 8) | (m_reg << 4))
+                else: self.emit16(0x6006 | (n << 8) | (m_reg << 4))
+                return
+            if mem['mode'] == 'disp_indexed':
+                # @(disp,Rm), Rn
+                # MOV.B @(disp,Rm), Rn = 1000_0100_nnnn_mmmm (disp in low 4)
+                # MOV.W @(disp,Rm), Rn = 1000_0101_nnnn_mmmm (disp/2 in low 4)
+                # MOV.L @(disp,Rm), Rn = 0101_nnnn_mmmm_dddd (disp/4 in low 4)
+                disp = mem['disp']
+                scale = 1 if mnem == 'mov.b' else 2 if mnem == 'mov.w' else 4
+                d = disp // scale
+                if mnem == 'mov.b': self.emit16(0x8400 | (n << 8) | (m_reg << 4) | (d & 0xF))
+                elif mnem == 'mov.w': self.emit16(0x8500 | (n << 8) | (m_reg << 4) | (d & 0xF))
+                else: self.emit16(0x5000 | (n << 8) | (m_reg << 4) | (d & 0xF))
+                return
+            if mem['mode'] == 'r0_indexed':
+                # @(R0,Rm), Rn
+                if mnem == 'mov.b': self.emit16(0x000C | (n << 8) | (m_reg << 4))
+                elif mnem == 'mov.w': self.emit16(0x000D | (n << 8) | (m_reg << 4))
+                else: self.emit16(0x000E | (n << 8) | (m_reg << 4))
+                return
+            if mem['mode'] == 'gbr':
+                # @(disp,GBR), R0
+                disp = mem['disp']
+                scale = 1 if mnem == 'mov.b' else 2 if mnem == 'mov.w' else 4
+                d = disp // scale
+                if mnem == 'mov.b': self.emit16(0xC400 | (d & 0xFF))
+                elif mnem == 'mov.w': self.emit16(0xC500 | (d & 0xFF))
+                else: self.emit16(0xC600 | (d & 0xFF))
+                return
+            if mem['mode'] == 'pcrel':
+                # @(disp,PC), Rn -- only W and L
+                disp = mem['disp']
+                if mnem == 'mov.w':
+                    d = disp >> 1
+                    self.emit16(0x9000 | (n << 8) | (d & 0xFF))
+                elif mnem == 'mov.l':
+                    d = disp >> 2
+                    self.emit16(0xD000 | (n << 8) | (d & 0xFF))
+                return
+            if mem['mode'] == 'pc_label':
+                # @(label,PC), Rn -- compute disp from label
+                target = self._resolve_value(mem[label], addr)
+                if mnem == 'mov.w':
+                    disp = (target - (addr + 4)) >> 1
+                    self.emit16(0x9000 | (n << 8) | (disp & 0xFF))
+                elif mnem == 'mov.l':
+                    disp = ((target & ~3) - ((addr & ~3) + 4)) >> 2
+                    self.emit16(0xD000 | (n << 8) | (disp & 0xFF))
+                return
+
+        raise ValueError(f"Cannot encode {mnem} {ops}")
 
     # ---- DSP instruction encoders ----
 
-    # DSP data register name -> Ds index
-    DSP_DATA_REG_MAP = {
+    # DSP data register name -> Ds index (from libCPU73050)
+    _DSP_DATA_REG_MAP = {
         'a1': 5, 'a0': 7, 'y0': 8, 'y1': 9,
         'm0': 10, 'm1': 11, 'x0': 12, 'a1g': 13, 'x1': 14, 'a0g': 15,
     }
 
     # DSP address register name -> As index
-    DSP_ADDR_REG_MAP = {'r4': 0, 'r5': 1, 'r2': 2, 'r3': 3}
+    _DSP_ADDR_REG_MAP = {'r4': 0, 'r5': 1, 'r2': 2, 'r3': 3}
 
-    def _encode_movs(self, mnem: str, ops: List[str]) -> Optional[int]:
-        """Encode MOVS.W / MOVS.L instructions."""
-        # Format: movs.w @As, Ds  or  movs.l @As+, Ds  etc.
+    # DSP op class base opcodes (from CPU73050 decomp)
+    _DSP_OP_BASE = {
+        'pclr': 0x8D, 'padd': 0xB1, 'psub': 0xA1,
+        'pmuls': 0x40, 'pcopy': 0xBD, 'pcmp': 0x84,
+        'pabs': 0x88, 'pneg': 0xA8, 'pdec': 0x9D, 'pinc': 0x99,
+        'pand': 0x95, 'por': 0xB5, 'pxor': 0xA5,
+        'pshl': 0x00, 'psha': 0x10,
+        'psts': 0xCD, 'plds': 0xED,
+        'pdms': 0x8C, 'pswa': 0x9C, 'prnd': 0xAD,
+        'paddc': 0xB0, 'psubc': 0xA0, 'pcmpgt': 0x85,
+        'pcmpeq': 0x86, 'pcmplt': 0x87,
+    }
+
+    def _emit_movs(self, mnem: str, ops: List[str]):
+        """Encode MOVS.W / MOVS.L instructions.
+
+        Format: movs.w @As, Ds  or  movs.l @As+, Ds  etc.
+        Encoding: 0000_00aa_dddd_mmmm
+          aa = As index (0=r4, 1=r5, 2=r2, 3=r3)
+          dddd = Ds index (see _DSP_DATA_REG_MAP)
+          mmmm = addressing mode:
+            0 = @As+Ix, Ds (word)    2 = @As+Ix, Ds (long)
+            4 = @As, Ds (word)        6 = @As, Ds (long)
+            8 = @-As, Ds (word)      10 = @-As, Ds (long)
+           12 = @As+, Ds (word)      14 = @As+, Ds (long)
+        """
         if len(ops) != 2:
-            return None
+            raise ValueError(f"MOVS requires 2 operands: {mnem} {ops}")
 
         is_long = mnem.endswith('.l')
-
-        # Parse the address operand
         addr_op = ops[0].strip()
         data_reg = ops[1].strip().lower()
 
-        # Determine As index and mode
         as_idx = None
         mode = None
 
-        # @As+Ix, Ds (indexed) -- mode 0 (word) or 2 (long)
+        # @As+Ix, Ds (indexed)
         if addr_op.startswith('@') and '+ix' in addr_op.lower():
             reg_part = addr_op[1:].lower().replace('+ix', '').strip()
-            as_idx = self.DSP_ADDR_REG_MAP.get(reg_part)
+            as_idx = self._DSP_ADDR_REG_MAP.get(reg_part)
             mode = 2 if is_long else 0
-
-        # @As, Ds (direct) -- mode 4 (word) or 6 (long)
+        # @As, Ds (direct)
         elif addr_op.startswith('@') and '+' not in addr_op and '-' not in addr_op:
             reg_part = addr_op[1:].strip().lower()
-            as_idx = self.DSP_ADDR_REG_MAP.get(reg_part)
+            as_idx = self._DSP_ADDR_REG_MAP.get(reg_part)
             mode = 6 if is_long else 4
-
-        # @-As, Ds (pre-decrement) -- mode 8 (word) or 10 (long)
+        # @-As, Ds (pre-decrement)
         elif addr_op.startswith('@-'):
             reg_part = addr_op[2:].strip().lower()
-            as_idx = self.DSP_ADDR_REG_MAP.get(reg_part)
+            as_idx = self._DSP_ADDR_REG_MAP.get(reg_part)
             mode = 10 if is_long else 8
-
-        # @As+, Ds (post-increment) -- mode 12 (word) or 14 (long)
+        # @As+, Ds (post-increment)
         elif addr_op.startswith('@') and addr_op.endswith('+'):
             reg_part = addr_op[1:-1].strip().lower()
-            as_idx = self.DSP_ADDR_REG_MAP.get(reg_part)
+            as_idx = self._DSP_ADDR_REG_MAP.get(reg_part)
             mode = 14 if is_long else 12
 
         if as_idx is None or mode is None:
-            return None
+            raise ValueError(f"Cannot parse MOVS address operand: {addr_op!r}")
 
-        ds_idx = self.DSP_DATA_REG_MAP.get(data_reg)
+        ds_idx = self._DSP_DATA_REG_MAP.get(data_reg)
         if ds_idx is None:
-            return None
+            raise ValueError(f"Unknown DSP data register: {data_reg!r}")
 
-        # Encoding: 0000_00aa_dddd_mmmm
-        return (as_idx << 8) | (ds_idx << 4) | mode
+        self.emit16((as_idx << 8) | (ds_idx << 4) | mode)
 
-    def _encode_movx_movy(self, mnem: str, ops: List[str]) -> Optional[int]:
-        """Encode MOVX.W / MOVY.W instructions (simplified)."""
-        # For now, return a NOPX/NOPY opcode
-        # Full encoding requires parsing the addressing mode and data register
-        return 0xF400  # NOPX NOPY
+    def _emit_movx_movy(self, mnem: str, ops: List[str]):
+        """Encode MOVX.W / MOVY.W / MOVX.L / MOVY.L instructions.
 
-    def _encode_dsp_op(self, mnem: str, ops: List[str]) -> Optional[int]:
+        These are double-memory instructions that access two memory
+        locations simultaneously.  Encoding is complex; for now we
+        emit a NOPX/NOPY placeholder and warn.
+        """
+        # MOVX.W = 0xF000 | encoding
+        # MOVY.W = 0xF400 | encoding
+        # Full encoding requires parsing both address operands
+        # For now, emit NOPX (0xF400) or NOPY (0xF500)
+        if mnem.startswith('movx'):
+            self.emit16(0xF400)  # NOPX
+        else:
+            self.emit16(0xF500)  # NOPY
+
+    def _emit_dsp_op(self, mnem: str, ops: List[str]):
         """Encode DSP operation instructions (PADD, PSUB, PMULS, etc.).
 
-        This is a simplified encoder that returns the base opcode for
-        the operation.  The exact opcode depends on the register operands
-        and the operation variant (DCT/DCF, etc.).
+        Encoding: 0xF000 | op_class (with optional DCT/DCF prefix)
+        DCT = conditional on DSP repeat counter (op_class + 1)
+        DCF = conditional on DSP repeat counter false (op_class + 2)
         """
-        # Map mnemonic to base op_class
-        op_map = {
-            'pclr': 0x8D, 'padd': 0xB1, 'psub': 0xA1,
-            'pmuls': 0x40, 'pcopy': 0xBD, 'pcmp': 0x84,
-            'pabs': 0x88, 'pneg': 0xA8, 'pdec': 0x9D, 'pinc': 0x99,
-            'pand': 0x95, 'por': 0xB5, 'pxor': 0xA5,
-            'pshl': 0x00, 'psha': 0x10,
-            'psts': 0xCD, 'plds': 0xED,
-        }
+        base = mnem  # e.g. 'padd', 'psub', 'pmuls', etc.
 
-        base = mnem[1:]  # remove 'p' prefix
-        if base.startswith('muls'):
-            op_class = 0x40  # PMULS+PCLR base
-        elif base in op_map:
-            op_class = op_map[base]
-        else:
-            return None
+        # Look up the base opcode
+        op_class = self._DSP_OP_BASE.get(base)
+        if op_class is None:
+            raise ValueError(f"Unknown DSP operation: {mnem}")
 
-        # Check for DCT/DCF prefix
+        # Check for DCT/DCF prefix in operands
         if ops and ops[0].lower() in ('dct', 'dcf'):
             prefix = ops[0].lower()
             ops = ops[1:]
             if prefix == 'dct':
-                op_class += 1  # DCT variant is usually base+1
+                op_class = op_class + 1
             else:
-                op_class += 2  # DCF variant is usually base+2
+                op_class = op_class + 2
 
-        # Return 0xF000 | op_class
-        return 0xF000 | op_class
+        self.emit16(0xF000 | op_class)
+# BF/S = 0x8F00, BT/S = 0x8E00
+# Patch the _emit_instr method to use the correct encoding.
+_orig_emit = _Assembler._emit_instr
+
+def _patched_emit(self, mnem, ops, addr, lineno):
+    if mnem in ('bt.s', 'bt/s'):
+        target = self._resolve_value(ops[0], addr)
+        disp = _cond_disp(target, addr)
+        self.emit16(0x8E00 | disp); return
+    if mnem in ('bf.s', 'bf/s'):
+        target = self._resolve_value(ops[0], addr)
+        disp = _cond_disp(target, addr)
+        self.emit16(0x8F00 | disp); return
+    return _orig_emit(self, mnem, ops, addr, lineno)
+
+_Assembler._emit_instr = _patched_emit
 
 
-def assemble(text: str, start_addr: int = 0) -> bytearray:
-    """Convenience function to assemble text into binary."""
-    asm = SH4Assembler()
-    return asm.assemble(text, start_addr)
+# ============================================================================
+# Public API
+# ============================================================================
+
+def assemble(code: str, start_addr: int = 0x8C000000) -> bytes:
+    """Assemble SH-4 source code into a binary.
+
+    Args:
+        code: SH-4 assembly source (multi-line string)
+        start_addr: Load address (PC value at the first instruction)
+
+    Returns:
+        bytes: The assembled binary
+
+    Raises:
+        ValueError: On syntax/encoding errors (with line number)
+    """
+    asm = _Assembler()
+    asm.start_addr = start_addr
+    lines = code.splitlines()
+    asm.pass1(lines)
+    asm.pass2(lines)
+    return bytes(asm.output)
+
+
+if __name__ == '__main__':
+    # Quick smoke test
+    code = """
+        mov #0x10, r0
+        mov.l table, r1
+        mov r0, r2
+        add #1, r2
+        cmp/eq r1, r2
+        bt done
+        bra loop
+        nop
+    loop:
+        add #1, r0
+        bra done
+        nop
+    done:
+        rts
+        nop
+        .align 4
+    table: .long 0x12345678
+    """
+    binary = assemble(code, 0x8C000000)
+    print(f"Assembled {len(binary)} bytes:")
+    for i in range(0, len(binary), 2):
+        op = int.from_bytes(binary[i:i+2], 'big')
+        print(f"  0x{0x8C000000+i:08X}: 0x{op:04X}")

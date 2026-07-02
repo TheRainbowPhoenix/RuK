@@ -252,10 +252,94 @@ def load_hh3(classpad, path: str) -> int:
     return parsed['e_entry']
 
 
+# ---------------------------------------------------------------------------
+# HHK symbol table (required by gint-compiled hh3 addins)
+# ---------------------------------------------------------------------------
+
+# The 16 syscalls that gint's hhk3_entry() looks up in the symbol table.
+# See gint/src/kernel/hhk3_start.c.
+HHK_SYSCALLS = [
+    'Mem_Malloc', 'Mem_Free',
+    'File_FindFirst', 'File_FindNext', 'File_FindClose',
+    'File_Remove', 'File_Open', 'File_Write', 'File_Close',
+    'File_Read', 'File_Flush', 'File_Mkdir', 'File_Stat',
+    'File_Rename', 'File_Fstat', 'File_Lseek',
+]
+
+
+def _setup_symbol_table(classpad) -> tuple:
+    """Create a synthetic HHK symbol table in RAM.
+
+    The table format (from gint's hhk3_entry):
+      - Guard string (must match OS version at 0x814fffe0) + NUL
+      - For each syscall: name + NUL + 4-byte address (big-endian)
+
+    The guard string is read from the OS ROM at 0x814fffe0.
+    All syscall addresses point to a stub in ILRAM (0xE5200080) that
+    executes `mov #0, r0; rts; nop` ? returns 0 to the caller.
+
+    Returns (table_address, table_length).
+    The table is placed at 0x8C070000 (in RAM, below the stack).
+    """
+    memmap = classpad.mem
+
+    # 1. Read the guard string from OS ROM at 0x814fffe0.
+    guard_addr = 0x814fffe0
+    guard_bytes = []
+    for i in range(16):
+        b = memmap.read8(guard_addr + i)
+        guard_bytes.append(b)
+        if b == 0:
+            break
+    guard_str = bytes(guard_bytes)
+
+    # 2. Write the RTS stub to ILRAM at 0xE5200080.
+    #    SH-4 encoding:
+    #      0xE000  mov #0, r0       (8-bit immediate 0 -> r0)
+    #      0x000B  rts              (return from subroutine)
+    #      0x0009  nop              (delay slot)
+    stub_addr = 0xE5200080
+    _write16(memmap, stub_addr,     0xE000)  # mov #0, r0
+    _write16(memmap, stub_addr + 2, 0x000B)  # rts
+    _write16(memmap, stub_addr + 4, 0x0009)  # nop (delay slot)
+
+    # 3. Build the symbol table at 0x8C070000.
+    table_addr = 0x8C070000
+    offset = 0
+
+    # Guard string + NUL
+    for b in guard_str:
+        memmap.write8(table_addr + offset, b)
+        offset += 1
+    if guard_bytes[-1] != 0:
+        memmap.write8(table_addr + offset, 0)
+        offset += 1
+
+    # Syscall entries: name + NUL + 4-byte address
+    for name in HHK_SYSCALLS:
+        for b in name.encode('ascii'):
+            memmap.write8(table_addr + offset, b)
+            offset += 1
+        memmap.write8(table_addr + offset, 0)  # NUL terminator
+        offset += 1
+        # 4-byte big-endian address (pointing to the RTS stub)
+        _write32(memmap, table_addr + offset, stub_addr)
+        offset += 4
+
+    return table_addr, offset
+
+
+def _write16(memmap, addr: int, val: int):
+    """Write a 16-bit big-endian value through the memory map."""
+    memmap.write8(addr,     (val >> 8) & 0xFF)
+    memmap.write8(addr + 1, val & 0xFF)
+
+
 def run_hh3(classpad, path: str,
             argv: Optional[List[str]] = None,
             envp: Optional[Dict[str, str]] = None,
-            stack_top: int = 0x8C080000) -> int:
+            stack_top: int = 0x8C080000,
+            setup_symbols: bool = True) -> int:
     """Load an .hh3 file and set up CPU state to run it.
 
     Mirrors yal's ELFLoader::execute():
@@ -273,9 +357,13 @@ def run_hh3(classpad, path: str,
     R5 points to argv[0], R6 points to envp[0], R4 holds argc.
 
     Default argv is [basename(path)] (matches yal's behavior).
-    Default envp is {"HHK_SYMBOL_TABLE": "0", "HHK_SYMBOL_TABLE_LEN": "0"}
-    (yal fills these with the symbol-table address, but for emulation
-    we use 0 since there's no OS symbol table available).
+
+    If `setup_symbols` is True (default), a synthetic HHK symbol table is
+    created in RAM and passed via envp.  This is required for gint-compiled
+    hh3 addins, whose hhk3_entry() panics (0x2020/0x2040/0x2060/0x2080)
+    if HHK_SYMBOL_TABLE / HHK_SYMBOL_TABLE_LEN are missing or zero.
+    The table uses the OS version guard string from 0x814fffe0 and
+    points all 16 syscalls to a RTS stub in ILRAM that returns 0.
 
     Returns the entry-point virtual address.
     """
@@ -283,7 +371,17 @@ def run_hh3(classpad, path: str,
         # Default argv[0] = basename of the path (like yal)
         import os
         argv = [os.path.basename(path)]
-    if envp is None:
+
+    # Set up the HHK symbol table so gint-compiled addins don't panic.
+    # This must happen BEFORE we build envp, because envp carries the
+    # table's address and length as hex strings.
+    if setup_symbols and envp is None:
+        sym_addr, sym_len = _setup_symbol_table(classpad)
+        envp = {
+            'HHK_SYMBOL_TABLE': f'{sym_addr:X}',
+            'HHK_SYMBOL_TABLE_LEN': f'{sym_len:X}',
+        }
+    elif envp is None:
         envp = {
             'HHK_SYMBOL_TABLE': '0',
             'HHK_SYMBOL_TABLE_LEN': '0',

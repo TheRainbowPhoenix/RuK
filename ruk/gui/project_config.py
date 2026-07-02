@@ -37,6 +37,7 @@ class Project:
     with_dma: bool = True
     with_display: bool = True
     with_ubc: bool = True
+    with_touch: bool = True
     is_assembly: bool = False  # True if rom_path is an .asm file to assemble
     last_opened: float = 0.0
     # HH3-specific: if set, this project loads an .hh3 addin via the ELF loader
@@ -70,6 +71,7 @@ class Project:
             with_dma=d.get('with_dma', True),
             with_display=d.get('with_display', True),
             with_ubc=d.get('with_ubc', True),
+            with_touch=d.get('with_touch', True),
             last_opened=d.get('last_opened', 0.0),
             is_assembly=d.get('is_assembly', False),
         	hh3_path=d.get('hh3_path', ''),

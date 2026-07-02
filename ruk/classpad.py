@@ -6,7 +6,8 @@ class Classpad:
     def __init__(self, rom: bytes, debug: bool = False, start_pc=None, ram_size: int = 0x100_0000,
                  with_tmu: bool = False, with_rtc: bool = False, with_ubc: bool = False,
                  with_dma: bool = False, with_display: bool = False,
-                 with_bsc: bool = True, with_cpg: bool = True):
+                 with_bsc: bool = True, with_cpg: bool = True,
+                 with_touch: bool = False):
         """
         Create a virtual Classpad II.
 
@@ -21,6 +22,7 @@ class Classpad:
         :param with_display: If True, attach an R61523 LCD display.
         :param with_bsc: If True, attach a BSC (Bus State Controller).
         :param with_cpg: If True, attach a CPG (Clock Pulse Generator).
+        :param with_touch: If True, attach an I2C + touchscreen.
         """
         # TODO: get real values !!
         self._ram = Memory(ram_size)
@@ -61,6 +63,8 @@ class Classpad:
         self._bsc = None
         self._cpg = None
         self._intc = None
+        self._touch = None
+        self._with_touch = with_touch   # remembered for _setup_display
 
         if with_tmu:
             self._setup_tmu()
@@ -76,6 +80,8 @@ class Classpad:
             self._setup_bsc()
         if with_cpg:
             self._setup_cpg()
+        if with_touch:
+            self._setup_touch()
         
         self.setup_catch_all_mmio()
 
@@ -145,7 +151,9 @@ class Classpad:
         from ruk.jcore.mmio import attach_display
 
         self._display = Display()
-        attach_display(self._memory, self._display)
+        # If touch will be attached, don't map PRDR here -- attach_touch
+        # will map it and share bit 4 (RS/DCX) with the Display.
+        attach_display(self._memory, self._display, with_touch=self._with_touch)
 
     def _setup_bsc(self):
         """Attach the BSC (Bus State Controller)."""
@@ -160,6 +168,11 @@ class Classpad:
         from ruk.jcore.mmio import attach_cpg
         self._cpg = CPG()
         attach_cpg(self._memory, self._cpg)
+
+    def _setup_touch(self):
+        """Attach the I2C + touchscreen."""
+        from ruk.jcore.touch import attach_touch
+        self._touch = attach_touch(self._memory, display=self._display)
 
     def load_rom(self, rom: bytes):
         self._rom.write_bin(0, rom)
@@ -308,6 +321,11 @@ class Classpad:
     def intc(self):
         """The InterruptController, or None if not attached."""
         return self._intc
+
+    @property
+    def touch(self):
+        """The TouchScreen peripheral, or None if not attached."""
+        return self._touch
 
     def tick_tmu(self, pphi_cycles: int = 0, rtc_cycles: int = 0):
         """

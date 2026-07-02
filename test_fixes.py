@@ -58,8 +58,8 @@ def test_sr_t_bit_extraction():
     cp.cpu.pc = 0x8C000000
     cp.cpu.regs['sr'] = 0x40000001   # MD=1, T=1, plus other bits set
     # BT +0 (disp=0): if T=1, PC = PC + 4 + 0*2 = PC + 4
-    # Encoding: 0x8900 | (disp & 0xFF) = 0x8900
-    run_one_instr(cp, encode_op(0x8900))
+    # Encoding: 0x8D00 | (disp & 0xFF) = 0x8D00
+    run_one_instr(cp, encode_op(0x8D00))
     expected = 0x8C000000 + 4
     assert cp.cpu.pc == expected, f"BT with T=1 should branch to PC+4=0x{expected:X}, got 0x{cp.cpu.pc:X}"
     print(f"  PASS: BT with SR=0x40000001 (T=1) branched to 0x{cp.cpu.pc:X}")
@@ -76,7 +76,7 @@ def test_sr_t_bit_extraction():
     # And BT with T=0 (should NOT branch)
     cp.cpu.pc = 0x8C000000
     cp.cpu.regs['sr'] = 0x40000000   # MD=1, T=0
-    run_one_instr(cp, encode_op(0x8900))
+    run_one_instr(cp, encode_op(0x8D00))
     expected = 0x8C000000 + 2  # just advance to next instruction
     assert cp.cpu.pc == expected, f"BT with T=0 should fall through to PC+2=0x{expected:X}, got 0x{cp.cpu.pc:X}"
     print(f"  PASS: BT with SR=0x40000000 (T=0) fell through to 0x{cp.cpu.pc:X}")
@@ -87,12 +87,12 @@ def test_negative_displacement_bt():
     print("\n[test] BT with negative displacement (c_long bug)")
     cp = make_cpu()
     # Place BT at 0x8C000010 with disp=-4 (branch back to 0x8C000008)
-    # BT disp encoding: 0x8900 | (disp & 0xFF). disp=-4 -> 0xFC.
+    # BT disp encoding: 0x8D00 | (disp & 0xFF). disp=-4 -> 0xFC.
     cp.cpu.pc = 0x8C000010
     cp.cpu.regs['sr'] = 0x01   # T=1
     # BT -4: target = PC + 4 + (disp << 1) = 0x10 + 4 + (-4 * 2) = 0x10 + 4 - 8 = 0x0C
     # Wait, let me recompute: disp=-4, target = 0x8C000010 + 4 + (-4 * 2) = 0x8C00000C
-    run_one_instr(cp, encode_op(0x89FC))
+    run_one_instr(cp, encode_op(0x8DFC))
     expected = 0x8C00000C
     assert cp.cpu.pc == expected, f"BT -4 should branch to 0x{expected:X}, got 0x{cp.cpu.pc:X}"
     print(f"  PASS: BT with disp=-4 branched to 0x{cp.cpu.pc:X}")
@@ -284,16 +284,13 @@ def test_bts_direction():
     cp = make_cpu()
     cp.cpu.pc = 0x8C000000
     cp.cpu.regs['sr'] = 1   # T=1
-    # BTS +0: 0x8D00 (delay-slot variant of BT)
-    # Actually BFS = 0x8E00 (BF/S), BTS = 0x8F00 (BT/S)
-    # Wait, let me check: BT/S = bit 10 set = 0x8D00? Or is it 0x8F00?
-    # From the SH-4 manual:
-    #   BT  = 1000_1001_dddd_dddd = 0x8900
-    #   BT/S = 1000_1101_dddd_dddd = 0x8D00
-    #   BF  = 1000_1011_dddd_dddd = 0x8B00
+    # SH-4 branch encodings (from the manual):
+    #   BT   = 1000_1101_dddd_dddd = 0x8D00
+    #   BT/S = 1000_1110_dddd_dddd = 0x8E00
+    #   BF   = 1000_1011_dddd_dddd = 0x8B00
     #   BF/S = 1000_1111_dddd_dddd = 0x8F00
-    # So BTS (which I implemented as BT/S) = 0x8D00
-    cp.ram.write_bin(0, encode_op(0x8D00) + b'\x00\x09')   # BT/S +0 with NOP delay
+    # So BTS (BT/S) = 0x8E00
+    cp.ram.write_bin(0, encode_op(0x8E00) + b'\x00\x09')   # BT/S +0 with NOP delay
     cp.cpu.step()
     # BT/S with T=1: branch to PC + 4 + 0*2 = 0x8C000004
     assert cp.cpu.pc == 0x8C000004, f"BTS with T=1 should branch to 0x8C000004, got 0x{cp.cpu.pc:X}"

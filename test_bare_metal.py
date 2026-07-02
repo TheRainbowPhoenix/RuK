@@ -61,10 +61,8 @@ and #0xEF, r0
 mov.b r0, @r14
 
 ! Select GRAM register (0x202)
-mov #0x02, r0
-shll8 r0
-or #0x02, r0
-mov.w r0, @r13
+mov #0x2C, r0
+            mov.w r0, @r13
 
 ! Set RS=1 (data mode) for pixel writes
 mov.b @r14, r0
@@ -158,10 +156,8 @@ mov.l disp_addr, r13
 mov.b @r14, r0
 and #0xEF, r0
 mov.b r0, @r14
-mov #0x02, r0
-shll8 r0
-or #0x02, r0
-mov.w r0, @r13
+mov #0x2C, r0
+            mov.w r0, @r13
 mov.b @r14, r0
 or #0x10, r0
 mov.b r0, @r14

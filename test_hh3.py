@@ -15,6 +15,7 @@ from ruk.classpad import Classpad
 from ruk.jcore.hh3 import (
     parse_elf, get_metadata, load_hh3, run_hh3,
     HH3Error, ELFMAG, EM_SH, ET_EXEC, PT_LOAD,
+    _setup_symbol_table, HHK_SYSCALLS,
 )
 
 # TestAzur.hh3 is downloaded from the RuK GitHub releases.
@@ -158,7 +159,11 @@ class TestHH3Loading(unittest.TestCase):
         self.assertEqual(env_null, 0)
 
     def test_default_argv_envp(self):
-        """run_hh3 with no argv/envp should use sensible defaults."""
+        """run_hh3 with no argv/envp should use sensible defaults.
+
+        With setup_symbols=True (default), a synthetic HHK symbol table
+        is created and its address/length are passed via envp.
+        """
         entry = run_hh3(self.cp, HH3_PATH)
         cpu = self.cp.cpu
         self.assertEqual(cpu.pc, entry)
@@ -177,6 +182,87 @@ class TestHH3Loading(unittest.TestCase):
             return s.decode('utf-8', 'replace')
 
         envp_ptr = cpu.regs[6]
+        env_strs = []
+        i = 0
+        while True:
+            ptr = read32(envp_ptr + i * 4)
+            if ptr == 0: break
+            env_strs.append(read_str(ptr))
+            i += 1
+        # The symbol table address should be non-zero
+        sym_line = [s for s in env_strs if s.startswith('HHK_SYMBOL_TABLE=')]
+        self.assertEqual(len(sym_line), 1)
+        sym_addr = int(sym_line[0].split('=')[1], 16)
+        self.assertNotEqual(sym_addr, 0, "Symbol table address should be non-zero")
+
+        len_line = [s for s in env_strs if s.startswith('HHK_SYMBOL_TABLE_LEN=')]
+        self.assertEqual(len(len_line), 1)
+        sym_len = int(len_line[0].split('=')[1], 16)
+        self.assertGreater(sym_len, 0, "Symbol table length should be > 0")
+
+    def test_symbol_table_setup(self):
+        """Verify the HHK symbol table is correctly built in RAM.
+
+        The gint hhk3_entry() reads the table and panics if:
+          - The guard string doesn't match 0x814fffe0 (panic 0x20c0)
+          - The table is too short (panic 0x20e0)
+        """
+        from ruk.jcore.hh3 import _setup_symbol_table, HHK_SYSCALLS
+        addr, length = _setup_symbol_table(self.cp)
+        self.assertGreater(addr, 0x8C000000)
+        self.assertLess(addr, 0x8D000000)
+        self.assertGreater(length, 0)
+
+        # Read the guard string from the table
+        mem = self.cp.mem
+        guard = b''
+        for i in range(16):
+            b = mem.read8(addr + i)
+            if b == 0: break
+            guard += bytes([b])
+
+        # Read the guard string from the OS ROM
+        os_guard = b''
+        for i in range(16):
+            b = mem.read8(0x814fffe0 + i)
+            if b == 0: break
+            os_guard += bytes([b])
+
+        self.assertEqual(guard, os_guard,
+                         "Symbol table guard must match OS version string")
+
+        # Verify all 16 syscalls are present
+        off = len(guard) + 1  # skip guard + NUL
+        for i, expected_name in enumerate(HHK_SYSCALLS):
+            name = b''
+            while True:
+                b = mem.read8(addr + off)
+                if b == 0: break
+                name += bytes([b]); off += 1
+            off += 1  # skip NUL
+            self.assertEqual(name.decode(), expected_name)
+            # Read the 4-byte address
+            stub_addr = (mem.read8(addr+off) << 24) | (mem.read8(addr+off+1) << 16) | \
+                        (mem.read8(addr+off+2) << 8) | mem.read8(addr+off+3)
+            off += 4
+            self.assertNotEqual(stub_addr, 0, f"{expected_name} has NULL address")
+
+    def test_symbol_table_no_symbols(self):
+        """With setup_symbols=False, envp should have 0 values."""
+        run_hh3(self.cp, HH3_PATH, setup_symbols=False)
+        mem = self.cp.mem
+        def read32(addr):
+            return (mem.read8(addr) << 24) | (mem.read8(addr+1) << 16) | \
+                   (mem.read8(addr+2) << 8) | mem.read8(addr+3)
+        def read_str(addr):
+            s = b''
+            while True:
+                b = mem.read8(addr)
+                if b == 0: break
+                s += bytes([b]); addr += 1
+            return s.decode('utf-8', 'replace')
+
+        envp_ptr = self.cp.cpu.regs[6]
         env_strs = []
         i = 0
         while True:
