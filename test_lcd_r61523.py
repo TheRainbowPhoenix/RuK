@@ -112,7 +112,7 @@ LCD_SETUP = """
 """ + lcd_cmd_asm(0x2C)
 
 LCD_POOL = """
-    .align 2
+    .align 4
     prdr_addr: .long 0xA405013C
     disp_addr: .long 0xB4000000
 """
@@ -704,7 +704,7 @@ class TestViaCPU(unittest.TestCase):
             nop
             end: bra end
             nop
-            .align 2
+            .align 4
             c_red: .long 0xF800
             c_green: .long 0x07E0
             c_blue: .long 0x001F
@@ -892,7 +892,7 @@ class TestViaCPU(unittest.TestCase):
             nop
             end: bra end
             nop
-            .align 2
+            .align 4
             prdr_addr: .long 0xA405013C
             disp_addr: .long 0xB4000000
         """, start_addr=0x8C000000)
@@ -1041,7 +1041,7 @@ class TestAssemblySelfTest(unittest.TestCase):
             nop
             end: bra end
             nop
-            .align 2
+            .align 4
             prdr_addr: .long 0xA405013C
             disp_addr: .long 0xB4000000
             store_addr: .long 0x8C001000

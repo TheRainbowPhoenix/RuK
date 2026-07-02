@@ -152,7 +152,7 @@ def _parse_line(line: str) -> Tuple[Optional[str], Optional[str], List[str], Opt
     # Strip comment
     comment = None
     for i, c in enumerate(line):
-        if c == ';' or (c == '/' and i + 1 < len(line) and line[i+1] == '/'):
+        if c == '!' or c == ';' or (c == '/' and i + 1 < len(line) and line[i+1] == '/'):
             comment = line[i:].strip()
             line = line[:i]
             break

@@ -195,7 +195,7 @@ class TestLCDViaCPU(unittest.TestCase):
             bra end
             nop
 
-            .align 2
+            .align 4
             prdr_addr:
             .long 0xA405013C
             disp_addr:
@@ -255,7 +255,7 @@ class TestLCDViaCPU(unittest.TestCase):
             bra end
             nop
 
-            .align 2
+            .align 4
             prdr_addr:
             .long 0xA405013C
             disp_addr:
@@ -324,7 +324,7 @@ class TestLCDViaCPU(unittest.TestCase):
             bra end
             nop
 
-            .align 2
+            .align 4
             prdr_addr:
             .long 0xA405013C
             disp_addr:

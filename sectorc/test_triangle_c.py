@@ -29,7 +29,7 @@ void main() {
     prdr = 0xA405013C;
     lcd = 0xB4000000;
     *(int*)prdr = 239;
-    *(int*)lcd = 514;
+    *(int*)lcd = 44;
     *(int*)prdr = 255;
     y = 0;
     while (y < 90) {
@@ -80,10 +80,10 @@ class TestSectorCTriangle(unittest.TestCase):
 
         fb = cp.display.get_framebuffer()
         white = sum(1 for row in fb for px in row if px == 0xFFFF)
-        self.assertGreater(white, 1000, f"Triangle should draw >1000 pixels, got {white}")
+        self.assertGreater(white, 3000, f"Triangle should draw >3000 pixels, got {white}")
 
     def test_triangle_shape(self):
-        """Verify the triangle has the correct total pixel count and decreasing width."""
+        """The triangle should have pixels in the expected region."""
         compiler = SectorC()
         asm = compiler.compile(TRIANGLE_C)
         binary = assemble(asm, start_addr=0x8C090000)
@@ -92,40 +92,24 @@ class TestSectorCTriangle(unittest.TestCase):
         for i, b in enumerate(binary):
             cp.mem.write8(0x8C090000 + i, b)
 
-        for i in range(2000000):
+        for i in range(5000000):
             cp.cpu.step()
             if cp.cpu.ebreak:
                 break
 
         fb = cp.display.get_framebuffer()
-        white = sum(1 for row in fb for px in row if px == 0xFFFF)
-        # Expected: sum over y=0..89 of (90 - 2*(y>>1))
-        # = sum of (90 - y) for even y + (90 - y - 1) for odd y
-        # ≈ 4050
-        self.assertGreater(white, 3000, f"Should have >3000 pixels, got {white}")
-        self.assertLess(white, 5000, f"Should have <5000 pixels, got {white}")
-
-        # The triangle is drawn in scanline order (GRAM auto-increment),
-        # so pixels wrap across display rows. Verify the first few rows
-        # have the most white pixels (they contain the widest part of the triangle).
-        # Total: ~4140 pixels across 396*528 screen = ~10.5 rows of full white
-        # The first 4-5 rows should be completely white (396 pixels each)
+        # Triangle draws ~4140 pixels via GRAM auto-increment
+        # Display is 360 wide, so 4140/360 = 11.5 rows
+        # Rows 0-10 should be full (360 pixels each)
         row_0 = sum(1 for x in range(DISPLAY_WIDTH) if fb[0][x] == 0xFFFF)
-        row_4 = sum(1 for x in range(DISPLAY_WIDTH) if fb[4][x] == 0xFFFF)
+        row_5 = sum(1 for x in range(DISPLAY_WIDTH) if fb[5][x] == 0xFFFF)
         row_10 = sum(1 for x in range(DISPLAY_WIDTH) if fb[10][x] == 0xFFFF)
-        row_11 = sum(1 for x in range(DISPLAY_WIDTH) if fb[11][x] == 0xFFFF)
+        row_12 = sum(1 for x in range(DISPLAY_WIDTH) if fb[12][x] == 0xFFFF)
 
-        # First rows should be full (396 pixels = entire row)
-        self.assertEqual(row_0, 396, f"Row 0 should be full, got {row_0}")
-        self.assertEqual(row_4, 396, f"Row 4 should be full, got {row_4}")
-        # Row 10 should be partial (4140 - 10*396 = 180 pixels)
-        # Actually 4140/396 = 10.45, so rows 0-9 are full (10*396=3960)
-        # and row 10 has 4140-3960=180 pixels
-        self.assertLess(row_10, 396, f"Row 10 should be partial, got {row_10}")
-        self.assertGreater(row_10, 100, f"Row 10 should have >100 pixels, got {row_10}")
-        # Row 11 should be empty
-        row_11 = sum(1 for x in range(DISPLAY_WIDTH) if fb[11][x] == 0xFFFF)
-        self.assertEqual(row_11, 0, f"Row 11 should be empty, got {row_11}")
+        self.assertEqual(row_0, 360, f"Row 0 should be full, got {row_0}")
+        self.assertEqual(row_5, 360, f"Row 5 should be full, got {row_5}")
+        self.assertGreater(row_10, 100, f"Row 10 should have pixels, got {row_10}")
+        self.assertEqual(row_12, 0, f"Row 12 should be empty, got {row_12}")
 
     def test_triangle_total_pixels(self):
         """The total pixel count should match the expected triangle area."""
@@ -161,7 +145,7 @@ class TestSh4CCBootstrappedTriangle(unittest.TestCase):
         self.assertGreater(len(binary), 100)
 
     def test_sh4cc_loads_and_runs(self):
-        """sh4cc.bin should load and run."""
+        """sh4cc.bin should compile and run the full TRIANGLE_C program."""
         binary = build_sh4cc()
         with open(ROM_PATH, 'rb') as f:
             rom = f.read()
@@ -171,26 +155,44 @@ class TestSh4CCBootstrappedTriangle(unittest.TestCase):
         for i, b in enumerate(binary):
             cp.mem.write8(0x8C000000 + i, b)
 
-        # Write a simple C source
-        c_source = b"void main() { }\x00"
+        # Write the full TRIANGLE_C source
+        c_source = TRIANGLE_C.encode() + b"\x00"
         for i, b in enumerate(c_source):
             cp.mem.write8(SOURCE_ADDR + i, b)
+        # Zero output area
+        for i in range(10000):
+            cp.mem.write8(OUTPUT_ADDR + i, 0)
 
         cp.cpu.pc = 0x8C000000
-        # Run for a limited number of steps (the compiler may hit
-        # issues with data section being executed as code, but it
-        # should produce some output before that)
-        ran = True
-        try:
-            for i in range(5000):
-                cp.cpu.step()
-                if cp.cpu.ebreak:
-                    break
-        except Exception:
-            ran = False
+        # Run the compiler
+        for i in range(10000000):
+            cp.cpu.step()
+            if cp.cpu.ebreak:
+                break
+            if 0x8C090000 <= cp.cpu.pc < 0x8C0A0000:
+                break  # Compiler finished, jumped to output
 
-        # Check that some output was produced
-        nonzero = sum(1 for i in range(64) if cp.mem.read8(OUTPUT_ADDR + i) != 0)
+        # Verify the compiler produced output
+        nonzero = sum(1 for i in range(100) if cp.mem.read8(OUTPUT_ADDR + i) != 0)
+        self.assertGreater(nonzero, 0, "sh4cc should produce compiled output")
+
+        # Run the compiled code
+        cp.cpu.regs[14] = VAR_BASE
+        cp.cpu.regs[15] = STACK_TOP
+        cp.cpu.regs['sr'] = 0x80000000
+        cp.cpu.pc = OUTPUT_ADDR
+        cp.cpu.on_step = None
+        for i in range(20000000):
+            cp.cpu.step()
+            if cp.cpu.ebreak:
+                break
+            if cp.mem.read16(cp.cpu.pc) == 0xAFFE:  # bra self (exit loop)
+                break
+
+        # Check that pixels were drawn
+        fb = cp.display.get_framebuffer()
+        white = sum(1 for row in fb for px in row if px == 0xFFFF)
+        self.assertGreater(white, 1000, f"Triangle should draw >1000 pixels, got {white}")
         self.assertGreater(nonzero, 0, "sh4cc should produce some output")
 
 

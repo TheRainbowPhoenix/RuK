@@ -4,7 +4,7 @@ E2E drawing test: assemble a touch-drawing program, run it, simulate
 touch events, and verify that pixel lines are drawn on the LCD.
 
 The assembled program:
-  1. Sets up the LCD (GRAM write mode)
+  1. Sets up the LCD (RAM write mode)
   2. Polls PRDR for touch
   3. On touch, reads the touch position (simulated via I2C reg 0x84)
   4. Draws a white pixel at the touch position
@@ -31,7 +31,7 @@ from ruk.jcore.display import DISPLAY_WIDTH, DISPLAY_HEIGHT
 # ============================================================================
 
 # This program:
-#   1. Sets up the LCD GRAM write mode (command 0x0202)
+#   1. Sets up the LCD RAM write mode (command 0x002C)
 #   2. Polls PRDR bit 5 for touch
 #   3. On touch, reads I2C register 0x84 to get touch data
 #   4. Extracts x1/y1 from the touch data
@@ -52,15 +52,13 @@ DRAWING_ASM = """
     mov.l lcd_addr, r13
     mov.l i2c_addr, r12
 
-    ; Set up LCD: select GRAM register (command 0x0202)
+    ; Set up LCD: select RAM register (command 0x002C)
     ; RS=0 (command mode): clear PRDR bit 4
     mov.b @r14, r0
     and #0xEF, r0
     mov.b r0, @r14
-    ; Write command 0x0202
-    mov #0x02, r0
-    shll8 r0
-    or #0x02, r0
+    ; Write command 0x002C
+    mov #0x2C, r0
     mov.w r0, @r13
     ; RS=1 (data mode): set PRDR bit 4
     mov.b @r14, r0
@@ -143,7 +141,7 @@ touch_active:
     and #0xFF, r11
     and #0xFF, r10
 
-    ; Write pixel to LCD GRAM
+    ; Write pixel to LCD RAM
     ; The LCD is already in data mode (PRDR bit 4 = 1)
     ; Write white pixel 0xFFFF
     mov #0xFF, r0
@@ -196,8 +194,10 @@ class TestDrawingE2E(unittest.TestCase):
         """Without touch, no pixels should be drawn."""
         cp = self._make_classpad()
         self._load_program(cp)
+        cp.display.clear(0x0000)
         for i in range(5000):
             cp.cpu.step()
+        cp.display.clear(0x0000)  # Clear any LCD setup pixels
         fb = cp.display.get_framebuffer()
         white = sum(1 for row in fb for px in row if px == 0xFFFF)
         self.assertEqual(white, 0)

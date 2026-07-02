@@ -660,6 +660,9 @@ class Display:
             self.prdr = val
 
     def write16(self, addr, val):
+        if addr == PRDR_ADDR:
+            self.prdr = val & 0xFF
+            return
         if (addr & 0xFF000000) == 0xB4000000:
             self.disp_write16(val)
 
