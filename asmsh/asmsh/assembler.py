@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .dsp_generated import DSP_OPERATION_WORDS
 from .probe import parse_listing
+from .renesas_obj import Relocation
 
 
 REG_RE = r"R(?:1[0-5]|[0-9])"
@@ -22,6 +23,14 @@ class ParsedLine:
     op: str | None
     args: list[str]
     address: int | None = None
+
+
+@dataclass
+class AssemblyResult:
+    words: list[str]
+    labels: dict[str, int]
+    exports: set[str]
+    relocations: list[Relocation]
 
 
 def strip_comment(raw: str) -> str:
@@ -272,6 +281,14 @@ def parse_pc_disp(text: str, labels: dict[str, int], pc: int, scale: int, resolv
     return (parse_int(expr) - base) // scale
 
 
+def pc_relative_symbol(text: str, labels: dict[str, int]) -> str | None:
+    m = re.fullmatch(r"@\(\s*([^,]+)\s*,\s*PC\s*\)", text.strip(), re.IGNORECASE)
+    expr = m.group(1).strip() if m else text.strip()
+    if expr in labels:
+        return expr
+    return None
+
+
 def parse_literal_disp(text: str, labels: dict[str, int], pc: int, scale: int, resolve_symbols: bool = False) -> int | None:
     disp = parse_pc_disp(text, labels, pc, scale, resolve_symbols)
     if disp is not None:
@@ -453,7 +470,7 @@ def word_for_sh4aldsp(line: ParsedLine) -> int | None:
 
 def word_for(line: ParsedLine, labels: dict[str, int], cpu: str = "SH1", resolve_symbols: bool = False) -> int | None:
     op = line.op
-    if not op or op.startswith("."):
+    if not op:
         return None
     args = line.args
     pc = line.address if line.address is not None else 0
@@ -464,6 +481,8 @@ def word_for(line: ParsedLine, labels: dict[str, int], cpu: str = "SH1", resolve
     if op in {".LONG", ".DATA.L"}:
         raise MiniAsmError(".LONG must be emitted through words_for")
     if op == ".ALIGN":
+        return None
+    if op.startswith("."):
         return None
     if op == "NOP" and not args:
         return 0x0009
@@ -727,7 +746,35 @@ def words_for(line: ParsedLine, labels: dict[str, int], cpu: str, resolve_symbol
     return [] if word is None else [word]
 
 
-def assemble_words(lines: list[str], cpu: str | None = None, resolve_symbols: bool = False) -> list[str]:
+def exported_symbols(parsed: list[ParsedLine]) -> set[str]:
+    exports: set[str] = set()
+    for line in parsed:
+        if line.op in {".EXPORT", ".GLOBAL", ".GLOBL"}:
+            exports.update(arg.strip() for arg in line.args if arg.strip())
+    return exports
+
+
+def collect_relocations(parsed: list[ParsedLine], labels: dict[str, int], cpu: str) -> list[Relocation]:
+    relocs: list[Relocation] = []
+    for line in parsed:
+        if line.address is None or len(line.args) != 2:
+            continue
+        if line.op in {"MOV.W", "MOV.L"}:
+            if not re.fullmatch(REG_RE, line.args[1].strip().upper()):
+                continue
+            symbol = pc_relative_symbol(line.args[0], labels)
+            if symbol is None:
+                continue
+            relocs.append(Relocation(line.address + 1, symbol, 0x24 if line.op == "MOV.W" else 0x23))
+            continue
+        if line.op == "MOVA" and line.args[1].strip().upper() == "R0":
+            symbol = pc_relative_symbol(line.args[0], labels)
+            if symbol is not None:
+                relocs.append(Relocation(line.address + 1, symbol, 0x23))
+    return relocs
+
+
+def assemble(lines: list[str], cpu: str | None = None, resolve_symbols: bool = False) -> AssemblyResult:
     cpu = normalize_cpu(cpu or cpu_from_source(lines) or "SH1")
     parsed = parse_source(lines)
     labels = first_pass(parsed)
@@ -735,7 +782,16 @@ def assemble_words(lines: list[str], cpu: str | None = None, resolve_symbols: bo
     for line in parsed:
         for word in words_for(line, labels, cpu, resolve_symbols):
             words.append(f"{word:04X}")
-    return words
+    return AssemblyResult(
+        words=words,
+        labels=labels,
+        exports=exported_symbols(parsed),
+        relocations=[] if resolve_symbols else collect_relocations(parsed, labels, cpu),
+    )
+
+
+def assemble_words(lines: list[str], cpu: str | None = None, resolve_symbols: bool = False) -> list[str]:
+    return assemble(lines, cpu, resolve_symbols).words
 
 
 def compare_listing(source_path: Path, listing_path: Path, cpu: str | None = None) -> dict[str, object]:

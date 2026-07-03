@@ -25,6 +25,33 @@ class ElfSection:
 
 
 @dataclass
+class ElfSymbol:
+    name: str
+    value: int
+    size: int
+    info: int
+    other: int
+    shndx: int
+
+
+@dataclass
+class ElfRelocation:
+    offset: int
+    symbol: str
+    symbol_index: int
+    reloc_type: int
+    addend: int
+
+
+@dataclass(frozen=True)
+class Relocation:
+    offset: int
+    symbol: str
+    reloc_type: int
+    addend: int = 0
+
+
+@dataclass
 class RenesasObject:
     sections: list[ElfSection]
 
@@ -40,6 +67,46 @@ class RenesasObject:
             return []
         data = section.data
         return [data[i : i + 2].hex().upper() for i in range(0, len(data) - 1, 2)]
+
+    def symbols(self) -> list[ElfSymbol]:
+        symtab = self.section(".symtab")
+        strtab = self.section(".strtab")
+        if symtab is None or strtab is None:
+            return []
+
+        def name_at(offset: int) -> str:
+            if offset >= len(strtab.data):
+                return ""
+            end = strtab.data.find(b"\0", offset)
+            if end < 0:
+                end = len(strtab.data)
+            return strtab.data[offset:end].decode("ascii", errors="replace")
+
+        symbols: list[ElfSymbol] = []
+        for i in range(0, len(symtab.data), 16):
+            raw = symtab.data[i : i + 16]
+            if len(raw) < 16:
+                break
+            st_name, value, size, info, other, shndx = struct.unpack(">IIIBBH", raw)
+            symbols.append(ElfSymbol(name_at(st_name), value, size, info, other, shndx))
+        return symbols
+
+    def relocations(self, section_name: str = "P") -> list[ElfRelocation]:
+        rela = self.section(f".rela{section_name}")
+        if rela is None:
+            return []
+        symbols = self.symbols()
+        relocs: list[ElfRelocation] = []
+        for i in range(0, len(rela.data), 12):
+            raw = rela.data[i : i + 12]
+            if len(raw) < 12:
+                break
+            offset, info, addend = struct.unpack(">III", raw)
+            symbol_index = info >> 8
+            reloc_type = info & 0xFF
+            symbol = symbols[symbol_index].name if symbol_index < len(symbols) else ""
+            relocs.append(ElfRelocation(offset, symbol, symbol_index, reloc_type, addend))
+        return relocs
 
 
 def align(value: int, boundary: int) -> int:
@@ -112,21 +179,42 @@ def _strtab(strings: list[str]) -> tuple[bytes, dict[str, int]]:
     return bytes(data), offsets
 
 
-def write_renesas_object(path: Path, words: list[str], source_name: str = "", section_name: str = "P") -> None:
+def write_renesas_object(
+    path: Path,
+    words: list[str],
+    source_name: str = "",
+    section_name: str = "P",
+    symbols: dict[str, int] | None = None,
+    exports: set[str] | None = None,
+    relocations: list[Relocation] | None = None,
+) -> None:
     code = words_to_bytes(words)
     shstr, shn = _strtab([".symtab", ".strtab", ".shstrtab", section_name, f".rela{section_name}"])
-    strtab, stn = _strtab([source_name, section_name, "_start"])
+    symbols = symbols or {}
+    exports = exports or set()
+    relocations = relocations or []
+    local_names = sorted(name for name in symbols if name not in exports)
+    export_names = sorted(exports)
+    strtab, stn = _strtab([source_name, section_name, *local_names, *export_names])
 
-    # Null, file, section, _start.
+    sym_entries = [
+        ("", 0, 0, 0, 0, 0),
+        (source_name, 0, 0, 4, 0, 0xFFF1),
+        (section_name, 0, 0, 3, 0, 4),
+    ]
+    for name in local_names:
+        sym_entries.append((name, symbols[name], 0, 0, 0, 4))
+    for name in export_names:
+        sym_entries.append((name, symbols.get(name, 0), 0, 0x10, 0, 4))
+    sym_index = {name: i for i, (name, *_rest) in enumerate(sym_entries)}
     symtab = b"".join(
-        [
-            struct.pack(">IIIBBH", 0, 0, 0, 0, 0, 0),
-            struct.pack(">IIIBBH", stn.get(source_name, 0), 0, 0, 4, 0, 0xFFF1),
-            struct.pack(">IIIBBH", stn[section_name], 0, 0, 3, 0, 3),
-            struct.pack(">IIIBBH", stn["_start"], 0, 0, 0x10, 0, 3),
-        ]
+        struct.pack(">IIIBBH", stn.get(name, 0), value, size, info, other, shndx)
+        for name, value, size, info, other, shndx in sym_entries
     )
-    rela = b""
+    rela = b"".join(
+        struct.pack(">III", reloc.offset, (sym_index[reloc.symbol] << 8) | reloc.reloc_type, reloc.addend & 0xFFFFFFFF)
+        for reloc in relocations
+    )
 
     offset = 52
     symtab_off = offset
@@ -143,7 +231,7 @@ def write_renesas_object(path: Path, words: list[str], source_name: str = "", se
 
     section_headers = [
         (0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        (shn[".symtab"], 2, 0, 0, symtab_off, len(symtab), 2, 3, 4, 16),
+        (shn[".symtab"], 2, 0, 0, symtab_off, len(symtab), 2, 3 + len(local_names), 4, 16),
         (shn[".strtab"], 3, 0, 0, strtab_off, len(strtab), 0, 0, 1, 0),
         (shn[".shstrtab"], 3, 0, 0, shstr_off, len(shstr), 0, 0, 1, 0),
         (shn[section_name], 1, 6, 0, code_off, len(code), 0, 0, 4, 0),

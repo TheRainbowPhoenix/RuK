@@ -17,6 +17,22 @@ def main() -> int:
     words = obj.words(args.section)
     if words:
         print(f"{args.section} words:", " ".join(words))
+    symbols = obj.symbols()
+    if symbols:
+        print("symbols:")
+        for i, symbol in enumerate(symbols):
+            print(
+                f"  {i}: {symbol.name or '<null>'} value=0x{symbol.value:X} "
+                f"info=0x{symbol.info:X} shndx=0x{symbol.shndx:X}"
+            )
+    relocs = obj.relocations(args.section)
+    if relocs:
+        print(f".rela{args.section}:")
+        for reloc in relocs:
+            print(
+                f"  off=0x{reloc.offset:X} sym={reloc.symbol}({reloc.symbol_index}) "
+                f"type=0x{reloc.reloc_type:X} addend={reloc.addend}"
+            )
     return 0
 
 

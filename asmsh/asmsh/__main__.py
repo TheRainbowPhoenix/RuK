@@ -5,7 +5,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from .assembler import MiniAsmError, assemble_words, cpu_from_source, normalize_cpu
+from .assembler import MiniAsmError, assemble, cpu_from_source, normalize_cpu
 from .renesas_obj import write_renesas_object, words_to_bytes
 
 
@@ -71,9 +71,11 @@ def run(argv: list[str]) -> int:
     cpu = args.cpu or cpu_from_source(lines) or "SH1"
     diagnostics: list[str] = []
     words: list[str] = []
+    result = None
     return_code = 0
     try:
-        words = assemble_words(lines, cpu, resolve_symbols=args.flat_object)
+        result = assemble(lines, cpu, resolve_symbols=args.flat_object)
+        words = result.words
     except MiniAsmError as exc:
         diagnostics.append(f"{args.source}(1) : 300 (E) {exc}")
         return_code = 2
@@ -83,7 +85,14 @@ def run(argv: list[str]) -> int:
         if args.flat_object:
             write_object_words(args.object_path, words)
         else:
-            write_renesas_object(args.object_path, words, source_name=args.source.name)
+            write_renesas_object(
+                args.object_path,
+                words,
+                source_name=args.source.name,
+                symbols=result.labels if result else {},
+                exports=result.exports if result else set(),
+                relocations=result.relocations if result else [],
+            )
     if not args.nologo:
         print("ASMSH-PY SuperH assembler clone")
     print(f"  *****TOTAL ERRORS       {1 if return_code else 0}")
