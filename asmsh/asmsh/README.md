@@ -28,7 +28,7 @@ Supported options today:
 - `asmsh/__main__.py`: `asmsh.exe`-style command-line entry point.
 - `asmsh/probe.py`: reference `asmsh.exe` runner and listing parser.
 - `asmsh/rawbin.py`: local-label resolver for turning listing/object words into standalone raw streams.
-- `asmsh/renesas_obj.py`: small SuperH ELF relocatable object reader/writer.
+- `asmsh/renesas_obj.py`: small SuperH ELF relocatable object reader/writer, including `.symtab` and `.relaP`.
 - `build_raw_draw.py`: builds the screen-draw raw binary fixture with both assemblers.
 - `dsp_matrix_probe.py`: probes SH4AL-DSP DSP forms against `asmsh.exe`.
 - `validate_dsp_matrix.py`: validates every accepted DSP matrix form against the Python assembler.
@@ -51,16 +51,17 @@ python compare_reference.py
 Current expected output:
 
 ```text
-sh4_nonfpu: success=True words=True obj=True ref=0/155 py=0/155
-sh4_touch_poll: success=True words=True obj=True ref=0/69 py=0/69
-sh4_triangle: success=True words=True obj=True ref=0/95 py=0/95
-sh4_fibonacci: success=True words=True obj=True ref=0/14 py=0/14
-sh4_gcd: success=True words=True obj=True ref=0/14 py=0/14
-sh4_checksum: success=True words=True obj=True ref=0/15 py=0/15
-sh4_memcopy: success=True words=True obj=True ref=0/16 py=0/16
-sh4aldsp_probe: success=True words=True obj=True ref=0/29 py=0/29
-sh4aldsp_dsp_confirmed: success=True words=True obj=True ref=0/37 py=0/37
-dsp_sigmadelta2_raw_negative: success=True words=True obj=True ref=4/0 py=2/0
+sh4_nonfpu: success=True words=True obj=True relocs=True ref=0/155 py=0/155
+sh4_touch_poll: success=True words=True obj=True relocs=True ref=0/69 py=0/69
+sh4_triangle: success=True words=True obj=True relocs=True ref=0/95 py=0/95
+sh4_fibonacci: success=True words=True obj=True relocs=True ref=0/14 py=0/14
+sh4_gcd: success=True words=True obj=True relocs=True ref=0/14 py=0/14
+sh4_checksum: success=True words=True obj=True relocs=True ref=0/15 py=0/15
+sh4_memcopy: success=True words=True obj=True relocs=True ref=0/16 py=0/16
+sh4_reloc_probe: success=True words=True obj=True relocs=True ref=0/7 py=0/7
+sh4aldsp_probe: success=True words=True obj=True relocs=True ref=0/29 py=0/29
+sh4aldsp_dsp_confirmed: success=True words=True obj=True relocs=True ref=0/37 py=0/37
+dsp_sigmadelta2_raw_negative: success=True words=True obj=True relocs=True ref=4/0 py=2/0
 ```
 
 The DSP sketch is intentionally a negative parity fixture.  The reference assembler rejects the raw GNU/macro/parallel-DSP sketch, and the Python clone rejects it too.  The next reverse-engineering target is the full SH4AL-DSP parallel/DSP-CO grammar, after which this fixture can become a positive test.
@@ -90,5 +91,17 @@ Both are flat big-endian SH word streams intended to be loaded at `0x80000000`. 
 ## Current Scope
 
 The Python clone matches the reference instruction-word stream and `P` section object words for the extracted SH1 set, the SH4 non-FPU set, and the confirmed SH4AL-DSP integer/cache/system/DSP subset.
+
+Relocatable object output now emits local symbols, exported symbols, and `.relaP` records for confirmed PC-relative local-label forms:
+
+- `MOV.W @(label,PC),Rn`: relocation type `0x24`, offset `instruction_offset + 1`.
+- `MOV.L @(label,PC),Rn`: relocation type `0x23`, offset `instruction_offset + 1`.
+- `MOVA @(label,PC),R0`: relocation type `0x23`, offset `instruction_offset + 1`.
+
+IDA-side structure notes recovered from `asmsh.exe`:
+
+- `AsmshRelocRecord` is 0x14 bytes: term head, term tail, next record, location offset, byte lane/adjusted location.
+- `AsmshRelocTerm` is 0x10 bytes: target, relocation type, addend/value, next term.
+- `AsmshFixupOperandRecord` carries encoder bitfield metadata: flags, bit offset, bit width, operand flags, field/eval data, sort link, next link.
 
 `validate_dsp_matrix.py` currently checks 1,068 accepted SH4AL-DSP DSP forms generated from the SH73050 references and confirmed through `asmsh.exe`: formulaic `MOVS.W/.L` forms across accepted address/data registers plus 588 generated DSP operation/parallel spellings.  The raw SigmaDelta sketch remains a negative parity fixture because its macro/numeric-label source form is not accepted by the legacy assembler as written.

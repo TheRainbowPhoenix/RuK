@@ -652,7 +652,7 @@ class CPU:
             self._jit = JITCompiler(self)
         return self._jit.run(max_steps)
 
-    def run_with_check(self, should_continue, max_steps_per_batch: int = 50000,
+    def run_with_check(self, should_continue, max_steps_per_batch: int = 2000,
                        tick_callback=None, tick_interval: int = 500):
         """JIT run that periodically checks if it should keep running.
 
@@ -691,7 +691,9 @@ class CPU:
             # Run one batch
             batch_steps = jit.run(max_steps_per_batch)
             total_steps += batch_steps
-            # Tick peripherals
+            # Tick peripherals via on_step callback (for touch, display, etc.)
+            if original_on_step is not None:
+                original_on_step(total_steps)
             if tick_callback is not None:
                 tick_callback(total_steps)
             # If the JIT ran fewer steps than requested, it hit a

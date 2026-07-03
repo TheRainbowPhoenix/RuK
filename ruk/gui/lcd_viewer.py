@@ -60,6 +60,13 @@ class LCDViewerWindow(BaseWindow):
         self._image = tk.PhotoImage(width=self._fb_width, height=self._fb_height)
         self._image_item = self.canvas.create_image(0, 0, anchor=tk.NW, image=self._image)
 
+        # Mouse/touch support
+        self._touch = None
+        self._mouse_down = False
+        self.canvas.bind('<ButtonPress-1>', self._on_mouse_down)
+        self.canvas.bind('<B1-Motion>', self._on_mouse_drag)
+        self.canvas.bind('<ButtonRelease-1>', self._on_mouse_up)
+
         # Initial render
         self._refresh()
 
@@ -101,9 +108,10 @@ class LCDViewerWindow(BaseWindow):
         # This is the bottleneck for large displays (360x640 = 230K pixels)
         pixel_rows = []
         for y in range(fb_height):
+            row = fb[y]
             row_pixels = []
             for x in range(fb_width):
-                val = fb[y][x] & 0xFFFF
+                val = row[x] & 0xFFFF
                 r, g, b = self._rgb565_to_rgb(val)
                 row_pixels.append(f"#{r:02X}{g:02X}{b:02X}")
             pixel_rows.append(' '.join(row_pixels))
@@ -134,6 +142,46 @@ class LCDViewerWindow(BaseWindow):
             self.root.after_cancel(self._after_id)
             self._after_id = None
         self.root.withdraw()
+
+    # ---- Touch/mouse support ----
+    # Allow clicking/dragging on the LCD to simulate touch input
+
+    def set_touch_device(self, touch):
+        """Set the TouchScreen device for mouse-to-touch translation."""
+        self._touch = touch
+
+    def _on_mouse_down(self, event):
+        """Mouse button pressed: start a touch."""
+        self._mouse_down = True
+        self._send_touch(event)
+
+    def _on_mouse_drag(self, event):
+        """Mouse dragged: update touch position."""
+        if getattr(self, '_mouse_down', False):
+            self._send_touch(event)
+
+    def _on_mouse_up(self, event):
+        """Mouse released: end touch."""
+        self._mouse_down = False
+        if hasattr(self, '_touch') and self._touch is not None:
+            self._touch.clear_touch()
+
+    def _send_touch(self, event):
+        """Convert mouse coordinates to touch coordinates and signal touch."""
+        if not hasattr(self, '_touch') or self._touch is None:
+            return
+        # Canvas coordinates -> display coordinates
+        # The canvas shows the framebuffer at 1:1 scale
+        x = event.x
+        y = event.y
+        # Clamp to display bounds
+        if 0 <= x < self._fb_width and 0 <= y < self._fb_height:
+            # Convert display coordinates to raw ADC values
+            # The touch controller expects 12-bit values (0-4095)
+            # Display is 360x640, so scale accordingly
+            adc_x = int(x * 4095 / self._fb_width)
+            adc_y = int(y * 4095 / self._fb_height)
+            self._touch.set_touch(adc_x, adc_y)
 
     def setup_callbacks(self):
         pass

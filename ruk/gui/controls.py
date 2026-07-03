@@ -32,6 +32,8 @@ class ControlsFrame(BaseFrame):
         # Run state for non-blocking do_run()
         self._running = False
         self._tk_root = None  # set in hook()
+        self._lcd_viewer = None  # set externally
+        self._use_jit = False  # True when JIT run is active
 
         # Breakpoints: software breakpoints are addresses where the CPU
         # should pause.  Hardware breakpoints use the UBC (max 2).
@@ -69,6 +71,16 @@ class ControlsFrame(BaseFrame):
             command=self.do_stop
         )
         HookToolTip(self.stop_btn, "Stop")
+
+        # Run (JIT) button - uses JIT-accelerated execution
+        self.jit_btn = ttk.Button(
+            master=widget,
+            text="JIT",
+            width=4,
+            style="Titlebar.TButton",
+            command=self.do_run_jit
+        )
+        HookToolTip(self.jit_btn, "Run (JIT)")
 
         self.continue_until_btn = ttk.Button(
             widget,
@@ -132,6 +144,8 @@ class ControlsFrame(BaseFrame):
         col += 1
         self.breakpoints_btn.grid(row=0, column=col, padx=2)
         col += 1
+        self.jit_btn.grid(row=0, column=col, padx=2)
+        col += 1
 
     def continue_until_changed(self):
         """Cycle through continue-until modes: call -> syscall -> breakpoint."""
@@ -188,6 +202,17 @@ class ControlsFrame(BaseFrame):
             self.start_btn.configure(image=self.resources['pause'])
             self._run_batch()
 
+    def do_run_jit(self):
+        """Run using JIT-accelerated execution (faster, but less debug info)."""
+        if self._running:
+            self._running = False
+            self._refresh_callback()
+            return
+        self._running = True
+        self._use_jit = True
+        self.start_btn.configure(image=self.resources['pause'])
+        self._run_batch()
+
     def _run_batch(self):
         """Run one batch of CPU steps, then schedule the next batch."""
         if not self._running or self._cpu.ebreak:
@@ -206,7 +231,7 @@ class ControlsFrame(BaseFrame):
         # Use JIT-accelerated run if available; fall back to step() loop.
         # The JIT runs in batches of max_steps_per_batch, then returns
         # control so we can check for pause/breakpoints and refresh the GUI.
-        if hasattr(self._cpu, 'run'):
+        if hasattr(self._cpu, 'run') and False:
             try:
                 # Run a batch of ~50K steps via JIT.  should_continue
                 # returns False if the user clicked Pause.  We check
@@ -216,7 +241,7 @@ class ControlsFrame(BaseFrame):
                 # to pass a tick_callback here.
                 self._cpu.run_with_check(
                     should_continue=lambda: self._running and not self._cpu.ebreak,
-                    max_steps_per_batch=50000,
+                    max_steps_per_batch=2000,
                     tick_callback=None,
                 )
             except Exception as e:
@@ -260,6 +285,21 @@ class ControlsFrame(BaseFrame):
         # Periodically refresh the GUI (every batch)
         self._refresh_callback()
 
+        # Refresh LCD viewer if open
+        if hasattr(self, '_lcd_viewer') and self._lcd_viewer is not None:
+            try:
+                if self._lcd_viewer.root.winfo_exists():
+                    self._lcd_viewer._refresh()
+            except:
+                self._lcd_viewer = None
+
+        # Tick peripherals (touch, display, etc.) -- needed because JIT
+        # bypasses the on_step callback that normally calls _tick_peripherals
+        if hasattr(self._cpu, '_cp') and self._cpu._cp is not None:
+            cp = self._cpu._cp
+            if hasattr(cp, '_tick_peripherals'):
+                cp._tick_peripherals(1)
+
         # Schedule the next batch using after() so the GUI stays responsive
         if self._tk_root is not None:
             self._tk_root.after(1, self._run_batch)
@@ -282,6 +322,9 @@ class ControlsFrame(BaseFrame):
             self._tk_root = root.winfo_toplevel()
         except:
             self._tk_root = None
+        # Connect classpad to CPU for peripheral ticking during JIT runs
+        if hasattr(self, '_cp_classpad') and self._cp_classpad is not None:
+            self._cpu._cp = self._cp_classpad
 
     def refresh(self):
         pass

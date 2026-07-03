@@ -1,0 +1,13 @@
+	.CPU SH4
+	.SECTION P,CODE
+	.EXPORT _start
+_start:
+	mov.w @(word_value,PC), r0
+	mov.l @(long_value,PC), r1
+	rts
+	nop
+long_value:
+	.DATA.L H'AABBCCDD
+word_value:
+	.DATA.W H'1234
+	.END

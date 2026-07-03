@@ -262,6 +262,13 @@ class RegisterFrame(BaseFrame):
             from ruk.gui.lcd_viewer import LCDViewerWindow
             if self._lcd_window is None or not self._lcd_window.root.winfo_exists():
                 self._lcd_window = LCDViewerWindow(self._root, self._cp.display)
+                # Enable auto-refresh so LCD updates during run
+                self._lcd_window._auto_var.set(1)
+                self._lcd_window._auto_refresh = True
+                self._lcd_window._schedule_refresh()
+                # Connect touch device for mouse-to-touch input
+                if hasattr(self._cp, '_touch') and self._cp._touch is not None:
+                    self._lcd_window.set_touch_device(self._cp._touch)
             else:
                 self._lcd_window._refresh()
                 self._lcd_window.root.lift()

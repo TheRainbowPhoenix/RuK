@@ -125,8 +125,22 @@ class DebuggerWindow(BaseWindow):
         self.control_ctrl: ControlsFrame = ControlsFrame(self._cp.cpu, self.resources)
         self.control_ctrl.hook(control_frame)
         self.control_ctrl.set_refresh_callback(self.refresh_all)
+        # Store reference to classpad for peripheral access during JIT runs
+        self.control_ctrl._cp_classpad = self._cp
 
         control_frame.pack(fill=tk.X, side=tk.TOP, expand=False, anchor=tk.N)
+
+        # Fix: suppress default ttk.Treeview DoubleClick handler that
+        # causes "invalid command name" errors when items are refreshed
+        def _suppress_treeview_doubleclick(event):
+            try:
+                w = event.widget
+                if isinstance(w, ttk.Treeview):
+                    return 'break'
+            except:
+                pass
+        root.bind('<<TreeviewOpen>>', lambda e: 'break', add='+')
+
 
         """
         ASM Frame: disasm view
