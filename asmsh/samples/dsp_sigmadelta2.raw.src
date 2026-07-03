@@ -1,0 +1,25 @@
+! Raw user-provided DSP sketch. This is intentionally kept as a negative
+! parity fixture for now: real asmsh and asmsh-py both reject it before we
+! implement the full SH4AL-DSP parallel/DSP-CO grammar.
+fun(SigmaDelta2)
+MOVS.L @R4+, A1
+shll16 r6
+MOVS.W @R5+, X0
+shlr2 r6
+MOVS.W @R5, X1
+mov.w 3f, r3
+ldrs 1f
+mov.l 4f, r5
+ldre 2f
+mov.l @r5, r1
+ldrc #32
+lds r6, Y1
+1: PSUB Y0, A1, Y0
+PSUB A1, Y1, Y0 PMULS X1, Y0, M0
+2: nop
+MOVS.L A1, @R4+
+rts
+MOVS.L M1, @R4
+3: .DATA.W H'4000
+4: .DATA.L H'E5000000
+fun_end(SigmaDelta2)

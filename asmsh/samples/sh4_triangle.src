@@ -1,0 +1,114 @@
+	.CPU SH4
+	.SECTION P,CODE
+	.EXPORT _start
+_start:
+	mov.l @(prdr_addr,PC), r14
+	mov.l @(disp_addr,PC), r13
+
+	mov.b @r14, r0
+	and #H'EF, r0
+	mov.b r0, @r14
+	mov #H'02, r0
+	shll8 r0
+	mov.w r0, @r13
+	mov.b @r14, r0
+	or #H'10, r0
+	mov.b r0, @r14
+	mov #0, r0
+	mov.w r0, @r13
+
+	mov.b @r14, r0
+	and #H'EF, r0
+	mov.b r0, @r14
+	mov #H'02, r0
+	shll8 r0
+	or #H'01, r0
+	mov.w r0, @r13
+	mov.b @r14, r0
+	or #H'10, r0
+	mov.b r0, @r14
+	mov #0, r0
+	mov.w r0, @r13
+
+	mov.b @r14, r0
+	and #H'EF, r0
+	mov.b r0, @r14
+	mov #H'00, r0
+	shll8 r0
+	or #H'2C, r0
+	mov.w r0, @r13
+	mov.b @r14, r0
+	or #H'10, r0
+	mov.b r0, @r14
+
+	mov #H'01, r7
+	shll8 r7
+	mov #H'68, r0
+	or r0, r7
+	mov #5, r8
+	shll2 r8
+	shll2 r8
+	shll2 r8
+	shll r8
+	mov #90, r9
+	shll r9
+
+	mov #0, r2
+row_loop3:
+	mov #0, r3
+col_loop3:
+	mov #75, r10
+	shll2 r10
+	shll r10
+	cmp/ge r10, r2
+	bt outside
+	mov r2, r5
+	shlr2 r5
+	shlr2 r5
+	mov r9, r6
+	sub r5, r6
+	mov r9, r11
+	add r5, r11
+	cmp/hs r6, r3
+	bf outside
+	cmp/ge r11, r3
+	bt outside
+	mov r2, r0
+	shlr2 r0
+	and #H'F8, r0
+	shll8 r0
+	mov r3, r1
+	shlr r1
+	mov r1, r0
+	and #H'FC, r0
+	or r1, r0
+	mov r2, r1
+	add r3, r1
+	shlr2 r1
+	shlr r1
+	mov r1, r0
+	and #H'1F, r0
+	or r1, r0
+	bra write_px
+	nop
+
+outside:
+	mov #0, r0
+
+write_px:
+	mov.w r0, @r13
+	add #1, r3
+	cmp/ge r7, r3
+	bf col_loop3
+	add #1, r2
+	cmp/ge r8, r2
+	bf row_loop3
+end3:
+	nop
+
+	.align 2
+prdr_addr:
+	.DATA.L H'A405013C
+disp_addr:
+	.DATA.L H'B4000000
+	.END

@@ -1,0 +1,73 @@
+*** SuperH RISC engine ASSEMBLER V.7.01.02.000 ***    07/03/26 02:40:51                                                  PAGE     1
+PROGRAM NAME =
+
+    1                               1             .CPU SH4
+    2 00000000                      2             .SECTION P,CODE
+    3                               3             .EXPORT _start
+    4 00000000                      4     _start:
+    5 00000000 DE00                 5             mov.l @(prdr_addr,PC), r14
+    6 00000002 DD00                 6             mov.l @(lcd_addr,PC), r13
+    7                               7     
+    8 00000004 E0EF                 8             mov #H'EF, r0
+    9 00000006 2E00                 9             mov.b r0, @r14
+   10 00000008 E02C                10             mov #H'2C, r0
+   11 0000000A 2D01                11             mov.w r0, @r13
+   12 0000000C E0FF                12             mov #H'FF, r0
+   13 0000000E 2E00                13             mov.b r0, @r14
+   14                              14     
+   15 00000010 E200                15             mov #0, r2
+   16 00000012                     16     row_loop:
+   17 00000012 6423                17             mov r2, r4
+   18 00000014 4401                18             shlr r4
+   19 00000016 E55A                19             mov #90, r5
+   20 00000018 3548                20             sub r4, r5
+   21 0000001A 6343                21             mov r4, r3
+   22                              22     
+   23 0000001C                     23     col_loop:
+   24 0000001C 3353                24             cmp/ge r5, r3
+   25 0000001E 8904                25             bt row_next
+   26 00000020 E0FF                26             mov #-1, r0
+   27 00000022 2D01                27             mov.w r0, @r13
+   28 00000024 7301                28             add #1, r3
+   29 00000026 AFF9                29             bra col_loop
+   30 00000028 0009                30             nop
+   31                              31     
+   32 0000002A                     32     row_next:
+   33 0000002A 7201                33             add #1, r2
+   34 0000002C E55A                34             mov #90, r5
+   35 0000002E 3253                35             cmp/ge r5, r2
+   36 00000030 8BEF                36             bf row_loop
+   37                              37     
+   38 00000032                     38     end:
+   39 00000032 AFFE                39             bra end
+   40 00000034 0009                40             nop
+   41                              41     
+   42 00000038                     42             .align 4
+   43 00000038                     43     prdr_addr:
+   44 00000038 A405013C            44             .DATA.L H'A405013C
+   45 0000003C                     45     lcd_addr:
+   46 0000003C B4000000            46             .DATA.L H'B4000000
+   47                              47             .END
+  *****TOTAL ERRORS       0
+  *****TOTAL WARNINGS     0
+*** SuperH RISC engine ASSEMBLER V.7.01.02.000 ***    07/03/26 02:40:51                                                  PAGE     2
+
+*** CROSS REFERENCE LIST
+
+NAME                             SECTION  ATTR VALUE             SEQUENCE
+
+P                                P        SCT  00000000      2*
+_start                           P        EXPT 00000000      3     4*
+col_loop                         P             0000001C     23*   29 
+end                              P             00000032     38*   39 
+lcd_addr                         P             0000003C      6    45*
+prdr_addr                        P             00000038      5    43*
+row_loop                         P             00000012     16*   36 
+row_next                         P             0000002A     25    32*
+*** SuperH RISC engine ASSEMBLER V.7.01.02.000 ***    07/03/26 02:40:51                                                  PAGE     3
+
+*** SECTION DATA LIST
+
+SECTION                          ATTRIBUTE    SIZE             START
+
+P                                REL-CODE    000000040        

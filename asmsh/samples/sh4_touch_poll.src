@@ -1,0 +1,81 @@
+	.CPU SH4
+	.SECTION P,CODE
+	.EXPORT _start
+_start:
+	mov.l @(prdr_addr,PC), r14
+	mov.l @(lcd_addr,PC), r13
+	mov.l @(i2c_addr,PC), r12
+
+	mov.b @r14, r0
+	and #H'EF, r0
+	mov.b r0, @r14
+	mov #H'2C, r0
+	mov.w r0, @r13
+	mov.b @r14, r0
+	or #H'10, r0
+	mov.b r0, @r14
+
+main_loop:
+	mov.b @r14, r0
+	tst #H'20, r0
+	bt touch_active
+	bra main_loop
+	nop
+
+touch_active:
+	mov #1, r0
+	mov.b r0, @(4, r12)
+	mov #H'94, r0
+	mov.b r0, @(4, r12)
+	mov #H'70, r0
+	mov.b r0, @r12
+	nop
+	nop
+	nop
+	mov #H'84, r0
+	mov.b r0, @r12
+	nop
+	nop
+	nop
+	mov #H'94, r0
+	mov.b r0, @(4, r12)
+	mov #H'71, r0
+	mov.b r0, @r12
+	nop
+	nop
+	nop
+	mov.b @r12, r0
+	shll8 r0
+	mov.b @r12, r1
+	or r1, r0
+	mov r0, r11
+	mov.b @r12, r0
+	shll8 r0
+	mov.b @r12, r1
+	or r1, r0
+	mov r0, r10
+	shlr2 r11
+	shlr2 r11
+	shlr2 r10
+	shlr2 r10
+	mov r11, r0
+	and #H'FF, r0
+	mov r0, r11
+	mov r10, r0
+	and #H'FF, r0
+	mov r0, r10
+	mov #H'FF, r0
+	shll8 r0
+	or #H'FF, r0
+	mov.w r0, @r13
+	bra main_loop
+	nop
+
+	.align 2
+prdr_addr:
+	.DATA.L H'A405013C
+lcd_addr:
+	.DATA.L H'B4000000
+i2c_addr:
+	.DATA.L H'A4470000
+	.END

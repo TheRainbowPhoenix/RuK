@@ -1,0 +1,23 @@
+	.CPU SH4
+	.SECTION P,CODE
+	.EXPORT _start
+_start:
+	mov.l @(src_ptr,PC), r4
+	mov.l @(dst_ptr,PC), r5
+	mov #4, r6
+	mov #0, r7
+copy_loop:
+	mov.l @r4+, r0
+	mov.l r0, @r5
+	add #4, r5
+	add #-1, r6
+	cmp/eq r7, r6
+	bf copy_loop
+	rts
+	nop
+	.align 2
+src_ptr:
+	.DATA.L H'8C001000
+dst_ptr:
+	.DATA.L H'8C002000
+	.END

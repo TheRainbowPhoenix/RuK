@@ -1,0 +1,47 @@
+	.CPU SH4
+	.SECTION P,CODE
+	.EXPORT _start
+_start:
+	mov.l @(prdr_addr,PC), r14
+	mov.l @(lcd_addr,PC), r13
+
+	mov #H'EF, r0
+	mov.b r0, @r14
+	mov #H'2C, r0
+	mov.w r0, @r13
+	mov #H'FF, r0
+	mov.b r0, @r14
+
+	mov #0, r2
+row_loop:
+	mov r2, r4
+	shlr r4
+	mov #90, r5
+	sub r4, r5
+	mov r4, r3
+
+col_loop:
+	cmp/ge r5, r3
+	bt row_next
+	mov #-1, r0
+	mov.w r0, @r13
+	add #1, r3
+	bra col_loop
+	nop
+
+row_next:
+	add #1, r2
+	mov #90, r5
+	cmp/ge r5, r2
+	bf row_loop
+
+end:
+	bra end
+	nop
+
+	.align 4
+prdr_addr:
+	.DATA.L H'A405013C
+lcd_addr:
+	.DATA.L H'B4000000
+	.END

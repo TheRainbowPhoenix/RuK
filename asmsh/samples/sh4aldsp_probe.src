@@ -1,0 +1,34 @@
+	.CPU SH4ALDSP
+	.SECTION P,CODE
+	.EXPORT _start
+_start:
+	clrdmxy
+	clrs
+	sets
+	setdmx
+	setdmy
+	ldtlb
+	synco
+	dt r0
+	braf r0
+	nop
+	bsrf r0
+	nop
+	shad r1,r0
+	shld r1,r0
+	dmuls.l r1,r0
+	dmulu.l r1,r0
+	mul.l r1,r0
+	pref @r0
+	prefi @r0
+	icbi @r0
+	ocbi @r0
+	ocbp @r0
+	ocbwb @r0
+	movca.l r0,@r1
+	movli.l @r1,r0
+	movco.l r0,@r1
+	movua.l @r1,r0
+	setrc #4
+	ldrc #4
+	.END

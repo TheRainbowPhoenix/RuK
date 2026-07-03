@@ -1,0 +1,21 @@
+	.CPU SH4
+	.SECTION P,CODE
+	.EXPORT _start
+_start:
+	mov #0, r0
+	mov #1, r1
+	mov #10, r2
+	mov #0, r7
+fib_loop:
+	cmp/eq r7, r2
+	bt fib_done
+	mov r1, r3
+	add r0, r1
+	mov r3, r0
+	add #-1, r2
+	bra fib_loop
+	nop
+fib_done:
+	rts
+	nop
+	.END

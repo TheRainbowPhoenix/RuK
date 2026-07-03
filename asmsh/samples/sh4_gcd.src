@@ -1,0 +1,22 @@
+	.CPU SH4
+	.SECTION P,CODE
+	.EXPORT _start
+_start:
+	mov #84, r0
+	mov #30, r1
+gcd_loop:
+	cmp/eq r1, r0
+	bt gcd_done
+	cmp/gt r1, r0
+	bt sub_b
+	sub r0, r1
+	bra gcd_loop
+	nop
+sub_b:
+	sub r1, r0
+	bra gcd_loop
+	nop
+gcd_done:
+	rts
+	nop
+	.END

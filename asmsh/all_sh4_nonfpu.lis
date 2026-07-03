@@ -1,0 +1,196 @@
+*** SuperH RISC engine ASSEMBLER V.7.01.02.000 ***    07/03/26 01:27:11                                                  PAGE     1
+PROGRAM NAME =
+
+    1                               1             .CPU SH4
+    2 00000000                      2             .SECTION P,CODE
+    3                               3             .EXPORT _start
+    4 00000000                      4     _start:
+    5 00000000 7001                 5             ADD #1,R0
+    6 00000002 321C                 6             ADD R1,R2
+    7 00000004 343E                 7             ADDC R3,R4
+    8 00000006 365F                 8             ADDV R5,R6
+    9 00000008 2879                 9             AND R7,R8
+   10 0000000A C97F                10             AND #127,R0
+   11 0000000C CD55                11             AND.B #85,@(R0,GBR)
+   12 0000000E 8B00                12             BF label_bf
+   13 00000010 0009                13             NOP
+   14 00000012                     14     label_bf:
+   15 00000012 8900                15             BT label_bt
+   16 00000014 0009                16             NOP
+   17 00000016                     17     label_bt:
+   18 00000016 A000                18             BRA label_bra
+   19 00000018 0009                19             NOP
+   20 0000001A                     20     label_bra:
+   21 0000001A 0023                21             BRAF R0
+   22 0000001C 0009                22             NOP
+   23 0000001E B000                23             BSR label_bsr
+   24 00000020 0009                24             NOP
+   25 00000022                     25     label_bsr:
+   26 00000022 0103                26             BSRF R1
+   27 00000024 0009                27             NOP
+   28 00000026 0028                28             CLRMAC
+   29 00000028 0048                29             CLRS
+   30 0000002A 0008                30             CLRT
+   31 0000002C 8805                31             CMP/EQ #5,R0
+   32 0000002E 3210                32             CMP/EQ R1,R2
+   33 00000030 3432                33             CMP/HS R3,R4
+   34 00000032 3653                34             CMP/GE R5,R6
+   35 00000034 3876                35             CMP/HI R7,R8
+   36 00000036 3A97                36             CMP/GT R9,R10
+   37 00000038 4B11                37             CMP/PZ R11
+   38 0000003A 4C15                38             CMP/PL R12
+   39 0000003C 2EDC                39             CMP/STR R13,R14
+   40 0000003E 2217                40             DIV0S R1,R2
+   41 00000040 0019                41             DIV0U
+   42 00000042 3434                42             DIV1 R3,R4
+   43 00000044 365D                43             DMULS.L R5,R6
+   44 00000046 3875                44             DMULU.L R7,R8
+   45 00000048 4910                45             DT R9
+   46 0000004A 665E                46             EXTS.B R5,R6
+   47 0000004C 687F                47             EXTS.W R7,R8
+   48 0000004E 6A9C                48             EXTU.B R9,R10
+   49 00000050 6CBD                49             EXTU.W R11,R12
+   50 00000052 412B                50             JMP @R1
+   51 00000054 0009                51             NOP
+   52 00000056 420B                52             JSR @R2
+   53 00000058 0009                53             NOP
+   54 0000005A 430E                54             LDC R3,SR
+   55 0000005C 441E                55             LDC R4,GBR
+   56 0000005E 452E                56             LDC R5,VBR
+   57 00000060 4607                57             LDC.L @R6+,SR
+*** SuperH RISC engine ASSEMBLER V.7.01.02.000 ***    07/03/26 01:27:11                                                  PAGE     2
+PROGRAM NAME =
+
+   58 00000062 4717                58             LDC.L @R7+,GBR
+   59 00000064 4827                59             LDC.L @R8+,VBR
+   60 00000066 490A                60             LDS R9,MACH
+   61 00000068 4A1A                61             LDS R10,MACL
+   62 0000006A 4B2A                62             LDS R11,PR
+   63 0000006C 4C06                63             LDS.L @R12+,MACH
+   64 0000006E 4D16                64             LDS.L @R13+,MACL
+   65 00000070 4E26                65             LDS.L @R14+,PR
+   66 00000072 0038                66             LDTLB
+   67 00000074 410F                67             MAC.W @R0+,@R1+
+   68 00000076 E212                68             MOV #18,R2
+   69 00000078 6433                69             MOV R3,R4
+   70 0000007A 2650                70             MOV.B R5,@R6
+   71 0000007C 2871                71             MOV.W R7,@R8
+   72 0000007E 2A92                72             MOV.L R9,@R10
+   73 00000080 6CB0                73             MOV.B @R11,R12
+   74 00000082 6ED1                74             MOV.W @R13,R14
+   75 00000084 6212                75             MOV.L @R1,R2
+   76 00000086 2434                76             MOV.B R3,@-R4
+   77 00000088 2655                77             MOV.W R5,@-R6
+   78 0000008A 2876                78             MOV.L R7,@-R8
+   79 0000008C 6A94                79             MOV.B @R9+,R10
+   80 0000008E 6CB5                80             MOV.W @R11+,R12
+   81 00000090 6ED6                81             MOV.L @R13+,R14
+   82 00000092 8014                82             MOV.B R0,@(4,R1)
+   83 00000094 8122                83             MOV.W R0,@(4,R2)
+   84 00000096 1431                84             MOV.L R3,@(4,R4)
+   85 00000098 8454                85             MOV.B @(4,R5),R0
+   86 0000009A 8562                86             MOV.W @(4,R6),R0
+   87 0000009C 5871                87             MOV.L @(4,R7),R8
+   88 0000009E C004                88             MOV.B R0,@(4,GBR)
+   89 000000A0 C102                89             MOV.W R0,@(4,GBR)
+   90 000000A2 C201                90             MOV.L R0,@(4,GBR)
+   91 000000A4 C404                91             MOV.B @(4,GBR),R0
+   92 000000A6 C502                92             MOV.W @(4,GBR),R0
+   93 000000A8 C601                93             MOV.L @(4,GBR),R0
+   94 000000AA 9000                94             MOV.W @(disp_label,PC),R0
+   95 000000AC D100                95             MOV.L @(disp_label,PC),R1
+   96 000000AE C700                96             MOVA @(disp_label,PC),R0
+   97 000000B0 01C3                97             MOVCA.L R0,@R1
+   98 000000B2 0229                98             MOVT R2
+   99 000000B4 0437                99             MUL.L R3,R4
+  100 000000B6 243F               100             MULS.W R3,R4
+  101 000000B8 265E               101             MULU.W R5,R6
+  102 000000BA 687B               102             NEG R7,R8
+  103 000000BC 6A9A               103             NEGC R9,R10
+  104 000000BE 0009               104             NOP
+  105 000000C0 6CB7               105             NOT R11,R12
+  106 000000C2 0193               106             OCBI @R1
+  107 000000C4 02A3               107             OCBP @R2
+  108 000000C6 03B3               108             OCBWB @R3
+  109 000000C8 2EDB               109             OR R13,R14
+  110 000000CA CB12               110             OR #18,R0
+  111 000000CC CF34               111             OR.B #52,@(R0,GBR)
+  112 000000CE 0483               112             PREF @R4
+  113 000000D0 4124               113             ROTCL R1
+  114 000000D2 4225               114             ROTCR R2
+*** SuperH RISC engine ASSEMBLER V.7.01.02.000 ***    07/03/26 01:27:11                                                  PAGE     3
+PROGRAM NAME =
+
+  115 000000D4 4304               115             ROTL R3
+  116 000000D6 4405               116             ROTR R4
+  117 000000D8 002B               117             RTE
+  118 000000DA 0009               118             NOP
+  119 000000DC 000B               119             RTS
+  120 000000DE 0009               120             NOP
+  121 000000E0 0058               121             SETS
+  122 000000E2 0018               122             SETT
+  123 000000E4 465C               123             SHAD R5,R6
+  124 000000E6 4520               124             SHAL R5
+  125 000000E8 4621               125             SHAR R6
+  126 000000EA 487D               126             SHLD R7,R8
+  127 000000EC 4700               127             SHLL R7
+  128 000000EE 4808               128             SHLL2 R8
+  129 000000F0 4918               129             SHLL8 R9
+  130 000000F2 4A28               130             SHLL16 R10
+  131 000000F4 4B01               131             SHLR R11
+  132 000000F6 4C09               132             SHLR2 R12
+  133 000000F8 4D19               133             SHLR8 R13
+  134 000000FA 4E29               134             SHLR16 R14
+  135 000000FC 001B               135             SLEEP
+  136 000000FE 0002               136             STC SR,R0
+  137 00000100 0112               137             STC GBR,R1
+  138 00000102 0222               138             STC VBR,R2
+  139 00000104 4303               139             STC.L SR,@-R3
+  140 00000106 4413               140             STC.L GBR,@-R4
+  141 00000108 4523               141             STC.L VBR,@-R5
+  142 0000010A 060A               142             STS MACH,R6
+  143 0000010C 071A               143             STS MACL,R7
+  144 0000010E 082A               144             STS PR,R8
+  145 00000110 4902               145             STS.L MACH,@-R9
+  146 00000112 4A12               146             STS.L MACL,@-R10
+  147 00000114 4B22               147             STS.L PR,@-R11
+  148 00000116 3218               148             SUB R1,R2
+  149 00000118 343A               149             SUBC R3,R4
+  150 0000011A 365B               150             SUBV R5,R6
+  151 0000011C 6878               151             SWAP.B R7,R8
+  152 0000011E 6A99               152             SWAP.W R9,R10
+  153 00000120 4B1B               153             TAS.B @R11
+  154 00000122 0C43               154             TRACE R12
+  155 00000124 C320               155             TRAPA #32
+  156 00000126 2DC8               156             TST R12,R13
+  157 00000128 C856               157             TST #86,R0
+  158 0000012A CC78               158             TST.B #120,@(R0,GBR)
+  159 0000012C 2FEA               159             XOR R14,R15
+  160 0000012E CA9A               160             XOR #154,R0
+  161 00000130 CEBC               161             XOR.B #188,@(R0,GBR)
+  162 00000132 221D               162             XTRCT R1,R2
+  163 00000134                    163     disp_label:
+  164 00000134 0009               164             NOP
+  165                             165             .END
+  *****TOTAL ERRORS       0
+  *****TOTAL WARNINGS     0
+*** SuperH RISC engine ASSEMBLER V.7.01.02.000 ***    07/03/26 01:27:11                                                  PAGE     4
+
+*** CROSS REFERENCE LIST
+
+NAME                             SECTION  ATTR VALUE             SEQUENCE
+
+P                                P        SCT  00000000      2*
+_start                           P        EXPT 00000000      3     4*
+disp_label                       P             00000134     94    95    96   163*
+label_bf                         P             00000012     12    14*
+label_bra                        P             0000001A     18    20*
+label_bsr                        P             00000022     23    25*
+label_bt                         P             00000016     15    17*
+*** SuperH RISC engine ASSEMBLER V.7.01.02.000 ***    07/03/26 01:27:11                                                  PAGE     5
+
+*** SECTION DATA LIST
+
+SECTION                          ATTRIBUTE    SIZE             START
+
+P                                REL-CODE    000000136        

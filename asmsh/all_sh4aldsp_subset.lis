@@ -1,0 +1,54 @@
+*** SuperH RISC engine ASSEMBLER V.7.01.02.000 ***    07/03/26 01:14:49                                                  PAGE     1
+PROGRAM NAME =
+
+    1                               1             .CPU SH4ALDSP
+    2 00000000                      2             .SECTION P,CODE
+    3                               3             .EXPORT _start
+    4 00000000                      4     _start:
+    5 00000000 0088                 5             CLRDMXY
+    6 00000002 0048                 6             CLRS
+    7 00000004 0058                 7             SETS
+    8 00000006 0098                 8             SETDMX
+    9 00000008 00C8                 9             SETDMY
+   10 0000000A 0038                10             LDTLB
+   11 0000000C 00AB                11             SYNCO
+   12 0000000E 4010                12             DT R0
+   13 00000010 0023                13             BRAF R0
+   14 00000012 0009                14             NOP
+   15 00000014 0003                15             BSRF R0
+   16 00000016 0009                16             NOP
+   17 00000018 401C                17             SHAD R1,R0
+   18 0000001A 401D                18             SHLD R1,R0
+   19 0000001C 301D                19             DMULS.L R1,R0
+   20 0000001E 3015                20             DMULU.L R1,R0
+   21 00000020 0017                21             MUL.L R1,R0
+   22 00000022 0083                22             PREF @R0
+   23 00000024 00D3                23             PREFI @R0
+   24 00000026 00E3                24             ICBI @R0
+   25 00000028 0093                25             OCBI @R0
+   26 0000002A 00A3                26             OCBP @R0
+   27 0000002C 00B3                27             OCBWB @R0
+   28 0000002E 01C3                28             MOVCA.L R0,@R1
+   29 00000030 0163                29             MOVLI.L @R1,R0
+   30 00000032 0173                30             MOVCO.L R0,@R1
+   31 00000034 41A9                31             MOVUA.L @R1,R0
+   32 00000036 8204                32             SETRC #4
+   33 00000038 8A04                33             LDRC #4
+   34                              34             .END
+  *****TOTAL ERRORS       0
+  *****TOTAL WARNINGS     0
+*** SuperH RISC engine ASSEMBLER V.7.01.02.000 ***    07/03/26 01:14:49                                                  PAGE     2
+
+*** CROSS REFERENCE LIST
+
+NAME                             SECTION  ATTR VALUE             SEQUENCE
+
+P                                P        SCT  00000000      2*
+_start                           P        EXPT 00000000      3     4*
+*** SuperH RISC engine ASSEMBLER V.7.01.02.000 ***    07/03/26 01:14:49                                                  PAGE     3
+
+*** SECTION DATA LIST
+
+SECTION                          ATTRIBUTE    SIZE             START
+
+P                                REL-CODE    00000003A        

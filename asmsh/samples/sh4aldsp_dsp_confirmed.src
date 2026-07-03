@@ -1,0 +1,32 @@
+	.CPU SH4ALDSP
+	.SECTION P,CODE
+	.EXPORT _start
+_start:
+	MOVS.L @R4+, A1
+	MOVS.W @R5+, X0
+	MOVS.W @R5, X1
+	LDS R6, Y1
+	LDS R6, A0
+	LDRS dsp_loop
+	LDRE dsp_done
+	LDRC #32
+dsp_loop:
+	PSUB A1, Y1, Y0
+	PMULS X1, Y0, M0
+	PADD A1, M0, Y0
+	PDEC A1, Y1
+	PABS X0, X0
+	PCMP X0, Y1
+	PCOPY Y0, A1
+	DCT PCOPY Y0, A1
+	DCF PCOPY X0, A1
+	PSTS MACH, A1
+	PSUB A1, Y1, Y0 PMULS X1, Y0, M0
+	DCT PCOPY Y0, A1 MOVX.W @R5, Y0 NOPY
+dsp_done:
+	MOVS.L A1, @R4+
+	MOVS.W A1, @R4
+	MOVX.W @R5, Y0 NOPY
+	rts
+	nop
+	.END
