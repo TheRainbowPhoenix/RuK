@@ -227,6 +227,10 @@ class Emulator:
         self._reg(165, self.CLRS)        # CLRS
         self._reg(166, self.CLRT)        # CLRT
         self._reg(212, self.LDTLB)       # LDTLB
+        self._reg(303, self.MOVLI_LINKED)
+        self._reg(304, self.MOVCO)
+        self._reg(305, self.MOVUA)
+        self._reg(306, self.MOVUA_POST)
         self._reg(213, self.MOVCA)       # MOVCA.L R0, @Rn
         self._reg(214, self.NOP)         # NOP
         self._reg(215, self.OCBI)        # OCBI @Rn
@@ -1540,6 +1544,38 @@ class Emulator:
         """LDTLB: load TLB entry.  We don't model the MMU/TLB, so this is a NOP."""
         self.cpu.pc = _u32(self.cpu.pc + 2)
 
+    def MOVLI_LINKED(self, n: int):
+        """MOVLI.L @Rn,R0: load and establish the single-CPU link flag."""
+        value = self.cpu.mem.read32(self.cpu.regs[n])
+        self.cpu.regs[0] = value
+        self.cpu._ldst = True
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def MOVCO(self, n: int):
+        """MOVCO.L R0,@Rn: conditionally store and consume the link flag."""
+        linked = self.cpu._ldst
+        self.cpu._ldst = False
+        self.cpu.regs['sr'] = (self.cpu.regs['sr'] & ~1) | int(linked)
+        if linked:
+            self.cpu.mem.write32(self.cpu.regs[n], self.cpu.regs[0])
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def MOVUA(self, n: int):
+        """MOVUA.L @Rn,R0: load a potentially unaligned longword."""
+        address = self.cpu.regs[n]
+        value = 0
+        for offset in range(4):
+            value = (value << 8) | self.cpu.mem.read8(_u32(address + offset))
+        self.cpu.regs[0] = value
+        self.cpu.pc = _u32(self.cpu.pc + 2)
+
+    def MOVUA_POST(self, n: int):
+        """MOVUA.L @Rn+,R0: increment the source unless it is R0."""
+        address = self.cpu.regs[n]
+        self.MOVUA(n)
+        if n != 0:
+            self.cpu.regs[n] = _u32(address + 4)
+
     def MOVCA(self, n: int):
         """MOVCA.L R0, @Rn: move with cache allocation.  Treated as MOV.L R0, @Rn."""
         self.cpu.mem.write32(self.cpu.regs[n], self.cpu.regs[0])
@@ -1576,6 +1612,7 @@ class Emulator:
     def TRAPA(self, i: int):
         """TRAPA #imm: trap exception.  PC -> SPC, SR -> SSR, EXPEVT=0x160, PC = VBR+0x100."""
         imm = i & 0xFF
+        self.cpu._ldst = False
         self.cpu.spc = _u32(self.cpu.pc + 2)
         self.cpu.ssr = self.cpu.regs['sr']
         self.cpu.sgr = self.cpu.regs[15]

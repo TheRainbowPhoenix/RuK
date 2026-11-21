@@ -117,6 +117,7 @@ def _deliver_interrupt(cpu, intevt: int):
     just verify the IRQ was delivered (PC is now VBR + 0x600) and that
     the handler at that address got executed.
     """
+    cpu._ldst = False
     sr = cpu.regs['sr']
     # Block further exceptions
     new_sr = sr | (1 << 31) | (1 << 29) | (1 << 28)

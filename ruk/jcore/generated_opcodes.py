@@ -1161,6 +1161,18 @@ opcodes_table: List[Tuple[int, str, int, int, Dict[str, int]]] = [
 
         }
     ), (
+        303, "movli.l @r{n:d}, R0",
+        0xF0FF, 0x0063, {'n': 0x0F00}
+    ), (
+        304, "movco.l R0, @r{n:d}",
+        0xF0FF, 0x0073, {'n': 0x0F00}
+    ), (
+        305, "movua.l @r{n:d}, R0",
+        0xF0FF, 0x40A9, {'n': 0x0F00}
+    ), (
+        306, "movua.l @r{n:d}+, R0",
+        0xF0FF, 0x40E9, {'n': 0x0F00}
+    ), (
         213, "movca.l R0, @r{n:d}",
         0b1111_0000_1111_1111,
         0b0000_0000_1100_0011,

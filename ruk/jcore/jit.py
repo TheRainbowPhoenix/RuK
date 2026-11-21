@@ -737,6 +737,7 @@ class BlockRunner:
                 else:
                     last = cpu.pc; lc = 0
         except IndexError:
+            cpu._ldst = False
             cpu.ebreak = True
 
         cpu.pc &= 0xFFFFFFFF
@@ -981,6 +982,7 @@ class JITCompiler:
                 if cpu.ebreak:
                     break
         except IndexError:
+            cpu._ldst = False
             cpu.ebreak = True
 
         cpu._step_count = step_count

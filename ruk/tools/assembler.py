@@ -423,6 +423,30 @@ class _Assembler:
             self.emit16(0x0058); return
         if mnem == 'clrmac':
             self.emit16(0x0028); return
+        if mnem == 'movli.l':
+            if len(ops) != 2 or not ops[0].startswith('@') or ops[1].lower() != 'r0':
+                raise ValueError('MOVLI.L requires @Rn,R0')
+            n = parse_reg(ops[0][1:])
+            if n is None:
+                raise ValueError('MOVLI.L requires an address register')
+            self.emit16(0x0063 | (n << 8)); return
+        if mnem == 'movco.l':
+            if len(ops) != 2 or ops[0].lower() != 'r0' or not ops[1].startswith('@'):
+                raise ValueError('MOVCO.L requires R0,@Rn')
+            n = parse_reg(ops[1][1:])
+            if n is None:
+                raise ValueError('MOVCO.L requires an address register')
+            self.emit16(0x0073 | (n << 8)); return
+        if mnem == 'movua.l':
+            if len(ops) != 2 or not ops[0].startswith('@') or ops[1].lower() != 'r0':
+                raise ValueError('MOVUA.L requires @Rn,R0 or @Rn+,R0')
+            operand = ops[0][1:]
+            post = operand.endswith('+')
+            n = parse_reg(operand[:-1] if post else operand)
+            if n is None:
+                raise ValueError('MOVUA.L requires an address register')
+            self.emit16((0x40E9 if post else 0x40A9) | (n << 8)); return
+
         if mnem == 'movca.l':
             # MOVCA.L R0, @Rn
             n = parse_reg(ops[1].lstrip('@'))

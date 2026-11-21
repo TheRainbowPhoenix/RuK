@@ -332,6 +332,7 @@ class CPU:
         self.debug = debug
         self.pc = start_pc & 0xFFFFFFFF
         self._start_pc = start_pc
+        self._ldst = False
         self._pc_wrap = PCWrapper(self)
 
         self.mem = mem
@@ -467,6 +468,7 @@ class CPU:
         lets the host inspect which channel triggered the break.
         """
         # Save state
+        self._ldst = False
         self.spc = self.pc & 0xFFFFFFFF
         self.ssr = self.regs['sr'] & 0xFFFFFFFF
         self.sgr = self.regs[15] & 0xFFFFFFFF
@@ -585,6 +587,7 @@ class CPU:
                             self._dsp_active = False
 
         except IndexError:
+            self._ldst = False
             self.ebreak = True
             if self.debug:
                 raise
@@ -726,6 +729,7 @@ class CPU:
     def reset(self):
         self.pc = self._start_pc
         self.regs.reset()
+        self._ldst = False
         self.ebreak = False
         # Clear JIT caches on reset (code may have changed)
         if hasattr(self, '_jit'):
