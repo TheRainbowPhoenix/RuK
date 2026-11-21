@@ -7,7 +7,7 @@ class Classpad:
                  with_tmu: bool = False, with_rtc: bool = False, with_ubc: bool = False,
                  with_dma: bool = False, with_display: bool = False,
                  with_bsc: bool = True, with_cpg: bool = True,
-                 with_touch: bool = False):
+                 with_touch: bool = False, with_btu: bool = False):
         """
         Create a virtual Classpad II.
 
@@ -23,6 +23,7 @@ class Classpad:
         :param with_bsc: If True, attach a BSC (Bus State Controller).
         :param with_cpg: If True, attach a CPG (Clock Pulse Generator).
         :param with_touch: If True, attach an I2C + touchscreen.
+        :param with_btu: If True, attach the experimental SH7305 BTU.
         """
         # TODO: get real values !!
         self._ram = Memory(ram_size)
@@ -82,6 +83,10 @@ class Classpad:
             self._setup_cpg()
         if with_touch:
             self._setup_touch()
+        self._btu = None
+        if with_btu:
+            from ruk.jcore.btu import attach_btu
+            self._btu = attach_btu(self._cpu, self._cpg)
         
         self.setup_catch_all_mmio()
 

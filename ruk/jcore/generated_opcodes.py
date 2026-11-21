@@ -3,6 +3,7 @@ from typing import List, Tuple, Dict
 
 
 opcodes_table: List[Tuple[int, str, int, int, Dict[str, int]]] = [
+    (271, "j_jp @r{n:d}", 0xF0FF, 0x403B, {'n': 0x0F00}),
     # (id, name:str, mask:int, code:int, args: dict{name:str, mask:int}
     (
         0, "mov r{m:d}, r{n:d}",

@@ -336,6 +336,8 @@ class CPU:
 
         self.mem = mem
         self.regs = Register()
+        # Optional target-specific bytecode translation unit backend.
+        self.btu = None
         self.emulator = Emulator(self)
         self.disassembler = Disassembler(debug=debug)
 

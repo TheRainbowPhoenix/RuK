@@ -139,6 +139,7 @@ class MemoryMap:
         self._cache_start = -1
         self._cache_end = -1
         self._cache_mem = None
+        self._cache_region_start = -1
         # Precomputed sorted list of (start, end, mem) for the cold path.
         self._regions_sorted = []
 
@@ -169,15 +170,24 @@ class MemoryMap:
         # Fast path: check the cached region first.
         cs = self._cache_start
         if cs <= address < self._cache_end:
-            return self._cache_mem, cs
+            return self._cache_mem, self._cache_region_start
 
         # Cold path: scan the precomputed (start, end, mem) list.
         # No len() calls needed here -- ends are precomputed in add().
-        for start, end, mem in self._regions_sorted:
+        for index, (start, end, mem) in enumerate(self._regions_sorted):
             if start <= address < end:
-                # Update cache
-                self._cache_start = start
-                self._cache_end = end
+                # Clip the cache to avoid masking any higher-priority
+                # overlapping peripheral when approaching it from a broad
+                # catch-all region.
+                low, high = start, end
+                for other_start, other_end, _ in self._regions_sorted[:index]:
+                    if other_end <= address:
+                        low = max(low, other_end)
+                    elif other_start > address:
+                        high = min(high, other_start)
+                self._cache_start = low
+                self._cache_end = high
+                self._cache_region_start = start
                 self._cache_mem = mem
                 return mem, start
         # no memory mapped

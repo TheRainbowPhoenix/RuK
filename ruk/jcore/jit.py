@@ -41,7 +41,7 @@ from typing import Dict, List, Tuple, Optional, Callable
 # Branch op_id sets (from emulator._resolve_table)
 # ---------------------------------------------------------------------------
 
-BRANCH_OP_IDS = {149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 161, 221, 270}
+BRANCH_OP_IDS = {149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 161, 221, 270, 271}
 DELAYED_OP_IDS = {150, 152, 153, 154, 155, 156, 157, 158, 161, 221}
 # Only BF/BT (no delay slot) can be JIT-compiled inline
 JIT_SAFE_BRANCH_IDS = {149, 151}  # BF, BT

@@ -2,7 +2,7 @@
 """Standalone hh3 runner.
 
 Usage:
-    python3 run_hh3.py <file.hh3> [max_steps]
+    python3 run_hh3.py <file.hh3> [max_steps] [--btu]
 
 Loads and runs an .hh3 file on the RuK emulator with all peripherals
 attached.  Useful for quick testing without the GUI.
@@ -19,8 +19,12 @@ def main():
         print(__doc__)
         sys.exit(1)
 
-    hh3_path = sys.argv[1]
-    max_steps = int(sys.argv[2]) if len(sys.argv) > 2 else 10_000_000
+    args = [arg for arg in sys.argv[1:] if arg != '--btu']
+    if not args:
+        print(__doc__)
+        sys.exit(1)
+    hh3_path = args[0]
+    max_steps = int(args[1]) if len(args) > 1 else 10_000_000
 
     # 1. Print hh3 metadata
     with open(hh3_path, 'rb') as f:
@@ -59,6 +63,7 @@ def main():
         rom, debug=False,
         with_tmu=True, with_rtc=True, with_dma=True,
         with_display=True, with_bsc=True, with_cpg=True,
+        with_btu='--btu' in sys.argv,
     )
 
     # 4. Load and run the hh3

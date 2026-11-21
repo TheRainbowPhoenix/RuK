@@ -70,6 +70,8 @@ def _exec_delay_slot(cpu, delay_slot_pc: int, branch_target: int):
             op, dargs = cpu.disassembler.disasm(op_val)
             callback = cpu.emulator.resolve(op)
             callback(**dargs)
+    except NotImplementedError:
+        raise
     except Exception:
         # If the delay slot fails (e.g. invalid opcode), just advance PC.
         cpu.pc = _u32(cpu.pc + 2)
@@ -318,6 +320,7 @@ class Emulator:
 
         # --- misc ---
         self._reg(270, self.TRAPA)       # TRAPA #imm
+        self._reg(271, self.J_JP)        # BTU bytecode-mode entry
 
         # --- multiply-accumulate (added for completeness) ---
         self._reg(101, self.DMULS_L)     # DMULS.L Rm, Rn
@@ -1454,6 +1457,14 @@ class Emulator:
         slot_pc = _u32(self.cpu.pc + 2)
         self.cpu.regs['pr'] = _u32(self.cpu.pc + 4)
         _exec_delay_slot(self.cpu, slot_pc, target)
+
+    def J_JP(self, n: int):
+        """Enter a target-specific BTU backend, which owns the resulting CPU state."""
+        if self.cpu.btu is None:
+            raise NotImplementedError(
+                f"J_JP @R{n} at 0x{self.cpu.pc:08X} requires a BTU backend"
+            )
+        self.cpu.btu.enter(self.cpu, n)
 
     def JMP(self, m: int):
         """JMP @Rm: jump to Rm with delay slot."""
