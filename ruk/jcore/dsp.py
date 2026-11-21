@@ -168,6 +168,56 @@ def handle_dsp_instruction(cpu, op_val: int) -> bool:
 
 def _execute_standalone_pop(cpu, word):
     """Execute validated F800 P-operations; return False for unsupported words."""
+    # PCLR Dz and its conditional forms (Sdsha handler 0x100308f0).
+    opcode = word >> 8
+    if opcode in (0x8D, 0x8E, 0x8F):
+        dest = (None, None, None, None, None, 'a1', None, 'a0',
+                'x0', 'x1', 'y0', 'y1', 'm0', None, 'm1', None)[word & 15]
+        if dest is None or word & 0xF0:
+            return False
+        dc = cpu.regs['dsr'] & 1
+        if (opcode == 0x8E and not dc) or (opcode == 0x8F and dc):
+            cpu.pc = _u32(cpu.pc + 4)
+            return True
+        cpu.regs[dest] = 0
+        if dest in ('a0', 'a1'):
+            cpu.regs[dest + 'g'] = 0
+        if opcode == 0x8D:
+            dsr = cpu.regs['dsr']
+            condition = int(((dsr >> 1) & 7) in (2, 5))
+            dsr = (dsr & ~0xF1) | 0x40 | condition
+            if dsr & 0x100:
+                selector = (dsr >> 9) & 7
+                cpu.regs['sr'] = (cpu.regs['sr'] & ~1) | int(selector in (2, 5))
+                dsr |= 0x4000
+            cpu.regs['dsr'] = dsr
+        cpu.pc = _u32(cpu.pc + 4)
+        return True
+
+    # PSTS MACH/MACL,Dz and PLDS Dz,MACH/MACL, with DCT/DCF.
+    opcode = word >> 8
+    mac_base = next((base for base in (0xCD, 0xDD, 0xED, 0xFD)
+                     if base <= opcode <= base + 2), None)
+    if mac_base is not None:
+        dest = (None, None, None, None, None, 'a1', None, 'a0',
+                'x0', 'x1', 'y0', 'y1', 'm0', None, 'm1', None)[word & 15]
+        if dest is None or word & 0xF0:
+            return False
+        dc = cpu.regs['dsr'] & 1
+        if (opcode == mac_base + 1 and not dc) or (opcode == mac_base + 2 and dc):
+            cpu.pc = _u32(cpu.pc + 4)
+            return True
+        mac = 'mach' if mac_base in (0xCD, 0xED) else 'macl'
+        if mac_base in (0xED, 0xFD):
+            cpu.regs[mac] = cpu.regs[dest]
+        else:
+            value = cpu.regs[mac]
+            cpu.regs[dest] = value
+            if dest in ('a0', 'a1'):
+                cpu.regs[dest + 'g'] = 0xFFFFFFFF if value & 0x80000000 else 0
+        cpu.pc = _u32(cpu.pc + 4)
+        return True
+
     # Sdsha logical operations and their DCT / DCF forms.
     opcode = word >> 8
     logical_base = next((base for base in (0x95, 0xA5, 0xB5)
