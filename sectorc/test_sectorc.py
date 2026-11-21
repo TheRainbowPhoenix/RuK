@@ -27,14 +27,26 @@ def _make_classpad():
                     with_display=True, with_touch=True)
 
 
-def _compile_and_run(source, max_steps=50000):
+def _compile_and_run(source, max_steps=50000, name="eee"):
+
+    with open(f"sh4cc/{name}.c", 'w') as f:
+        f.write(source)
+    
     compiler = SectorC()
     asm = compiler.compile(source)
+
+    with open(f"sh4cc/{name}.s", 'w') as f:
+        f.write(asm)
+
     try:
         binary = assemble(asm, start_addr=0x8C000000)
     except Exception as e:
         raise RuntimeError(f"Assembly failed:\n{asm}\nError: {e}")
     cp = _make_classpad()
+    
+    with open(f"sh4cc/{name}.bin", 'wb') as f:
+        f.write(binary)
+    
     cp.ram.write_bin(0, binary)
     cp.cpu.pc = 0x8C000000
     for i in range(max_steps):
@@ -64,7 +76,7 @@ class TestFunctionArgs(unittest.TestCase):
                 result = add(3, 4);
             }
         """
-        cp, asm = _compile_and_run(source)
+        cp, asm = _compile_and_run(source, name="add")
         # result is the first global variable
         result = cp.mem.read32(0x8C070000)
         self.assertEqual(result, 7, f"add(3,4) should be 7, got {result}")
@@ -80,7 +92,7 @@ class TestFunctionArgs(unittest.TestCase):
                 result = sub(10, 3);
             }
         """
-        cp, _ = _compile_and_run(source)
+        cp, _ = _compile_and_run(source, name="sub")
         result = cp.mem.read32(0x8C070000)
         self.assertEqual(result, 7, f"sub(10,3) should be 7, got {result}")
 
@@ -95,7 +107,7 @@ class TestFunctionArgs(unittest.TestCase):
                 result = mul(6, 7);
             }
         """
-        cp, _ = _compile_and_run(source)
+        cp, _ = _compile_and_run(source, name="mul")
         result = cp.mem.read32(0x8C070000)
         self.assertEqual(result, 42, f"mul(6,7) should be 42, got {result}")
 
@@ -110,7 +122,7 @@ class TestFunctionArgs(unittest.TestCase):
                 result = add3(1, 2, 3);
             }
         """
-        cp, _ = _compile_and_run(source)
+        cp, _ = _compile_and_run(source, name="add3")
         result = cp.mem.read32(0x8C070000)
         self.assertEqual(result, 6, f"add3(1,2,3) should be 6, got {result}")
 
@@ -132,7 +144,7 @@ class TestRecursion(unittest.TestCase):
                 result = fib(10);
             }
         """
-        cp, _ = _compile_and_run(source, max_steps=500000)
+        cp, _ = _compile_and_run(source, max_steps=500000, name="fib")
         result = cp.mem.read32(0x8C070000)
         self.assertEqual(result, 55, f"fib(10) should be 55, got {result}")
 
@@ -150,7 +162,7 @@ class TestRecursion(unittest.TestCase):
                 result = fact(5);
             }
         """
-        cp, _ = _compile_and_run(source, max_steps=200000)
+        cp, _ = _compile_and_run(source, max_steps=200000, name="fact")
         result = cp.mem.read32(0x8C070000)
         self.assertEqual(result, 120, f"fact(5) should be 120, got {result}")
 
@@ -170,7 +182,7 @@ class TestRecursion(unittest.TestCase):
                 r1 = fib(1);
             }
         """
-        cp, _ = _compile_and_run(source, max_steps=50000)
+        cp, _ = _compile_and_run(source, max_steps=50000, name="fib_n")
         v0 = cp.mem.read32(0x8C070000)
         v1 = cp.mem.read32(0x8C070000 + 4)
         self.assertEqual(v0, 0, f"fib(0) should be 0, got {v0}")
@@ -197,7 +209,7 @@ class TestControlFlow(unittest.TestCase):
                 result = sum_range(1, 5);
             }
         """
-        cp, _ = _compile_and_run(source, max_steps=50000)
+        cp, _ = _compile_and_run(source, max_steps=50000, name="sum_range")
         result = cp.mem.read32(0x8C070000)
         self.assertEqual(result, 15, f"sum(1..5) should be 15, got {result}")
 
@@ -215,7 +227,7 @@ class TestControlFlow(unittest.TestCase):
                 result = max(7, 3);
             }
         """
-        cp, _ = _compile_and_run(source)
+        cp, _ = _compile_and_run(source, name="max")
         result = cp.mem.read32(0x8C070000)
         self.assertEqual(result, 7, f"max(7,3) should be 7, got {result}")
 
@@ -233,7 +245,7 @@ class TestControlFlow(unittest.TestCase):
                 result = max(3, 7);
             }
         """
-        cp, _ = _compile_and_run(source)
+        cp, _ = _compile_and_run(source, name="max_rev")
         result = cp.mem.read32(0x8C070000)
         self.assertEqual(result, 7, f"max(3,7) should be 7, got {result}")
 
@@ -252,7 +264,7 @@ class TestNestedCalls(unittest.TestCase):
                 result = add(add(1, 2), add(3, 4));
             }
         """
-        cp, _ = _compile_and_run(source, max_steps=50000)
+        cp, _ = _compile_and_run(source, max_steps=50000, name="add_nest")
         result = cp.mem.read32(0x8C070000)
         self.assertEqual(result, 10, f"add(add(1,2),add(3,4)) should be 10, got {result}")
 
@@ -267,7 +279,7 @@ class TestNestedCalls(unittest.TestCase):
                 result = sq(9);
             }
         """
-        cp, _ = _compile_and_run(source)
+        cp, _ = _compile_and_run(source, name="square")
         result = cp.mem.read32(0x8C070000)
         self.assertEqual(result, 81, f"sq(9) should be 81, got {result}")
 
@@ -286,7 +298,7 @@ class TestNoArgsFunctions(unittest.TestCase):
                 set_x();
             }
         """
-        cp, _ = _compile_and_run(source)
+        cp, _ = _compile_and_run(source, name="setx")
         x = cp.mem.read32(0x8C070000)
         self.assertEqual(x, 42, f"x should be 42, got {x}")
 
@@ -301,7 +313,7 @@ class TestNoArgsFunctions(unittest.TestCase):
                 }
             }
         """
-        cp, _ = _compile_and_run(source, max_steps=5000)
+        cp, _ = _compile_and_run(source, max_steps=5000, name="while")
         i = cp.mem.read32(0x8C070000)
         self.assertEqual(i, 10, f"i should be 10, got {i}")
 

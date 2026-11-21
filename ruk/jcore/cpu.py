@@ -524,8 +524,19 @@ class CPU:
             op_val = mem.read16(pre_pc)
 
             # ---- Dispatch ----
+            from ruk.jcore.dsp import is_dsp_instruction, handle_dsp_instruction, handle_dsp_transfer
             entry = dispatch[op_val]
-            if entry is not None:
+            if (self.regs['sr'] & 0x1000) and handle_dsp_transfer(self, op_val):
+                pass
+            elif (op_val & 0xF0FF) == 0x0043:
+                # Sdsha's TRACE handler reads Rn for trace instrumentation.
+                _ = self.regs[(op_val >> 8) & 15]
+                self.pc = (pre_pc + 2) & 0xFFFFFFFF
+            elif is_dsp_instruction(op_val):
+                # DSP enable can change at runtime; never cache this decision.
+                if not handle_dsp_instruction(self, op_val):
+                    self.pc = (pre_pc + 2) & 0xFFFFFFFF
+            elif entry is not None:
                 # Happy path: precomputed (handler, args_tuple).
                 # `handler(*args)` is the positional-call form -- ~30%
                 # faster than `handler(**args)` because CPython skips

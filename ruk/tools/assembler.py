@@ -400,6 +400,11 @@ class _Assembler:
     def _emit_instr(self, mnem: str, ops: List[str], addr: int, lineno: int):
         """Emit one instruction."""
         # ---- NOP ----
+        if mnem == 'trace':
+            if len(ops) != 1:
+                raise ValueError('TRACE requires one register')
+            self.emit16(0x0043 | (parse_reg(ops[0]) << 8)); return
+
         if mnem == 'nop':
             self.emit16(0x0009); return
         if mnem == 'sleep':
@@ -842,20 +847,20 @@ class _Assembler:
 
         # ---- DSP: MOVX.W / MOVY.W ----
         if mnem in ('movx.w', 'movy.w', 'movx.l', 'movy.l'):
-            self._emit_movx_movy(mnem, ops); return
+            raise ValueError(f'{mnem} encoding is not implemented')
 
         # ---- DSP: PADD / PSUB / PMULS / PCLR / etc. ----
         if mnem.startswith('p') and len(mnem) > 1 and mnem[1:4] in (
             'add', 'sub', 'mul', 'clr', 'cop', 'cmp', 'abs', 'neg',
             'dec', 'inc', 'and', 'or', 'xor', 'shl', 'sha', 'sts',
             'lds'):
-            self._emit_dsp_op(mnem, ops); return
+            raise ValueError(f'{mnem} encoding is not implemented')
 
         # ---- DSP: NOPX / NOPY ----
         if mnem == 'nopx':
-            self.emit16(0xF400); return
+            raise ValueError('NOPX encoding is not implemented')
         if mnem == 'nopy':
-            self.emit16(0xF500); return
+            raise ValueError('NOPY encoding is not implemented')
 
         raise ValueError(f"Unknown instruction: {mnem} {ops}")
 
@@ -1005,8 +1010,8 @@ class _Assembler:
 
     # DSP data register name -> Ds index (from libCPU73050)
     _DSP_DATA_REG_MAP = {
-        'a1': 5, 'a0': 7, 'y0': 8, 'y1': 9,
-        'm0': 10, 'm1': 11, 'x0': 12, 'a1g': 13, 'x1': 14, 'a0g': 15,
+        'a1': 5, 'a0': 7, 'x0': 8, 'x1': 9,
+        'y0': 10, 'y1': 11, 'm0': 12, 'a1g': 13, 'm1': 14, 'a0g': 15,
     }
 
     # DSP address register name -> As index
@@ -1026,57 +1031,27 @@ class _Assembler:
     }
 
     def _emit_movs(self, mnem: str, ops: List[str]):
-        """Encode MOVS.W / MOVS.L instructions.
-
-        Format: movs.w @As, Ds  or  movs.l @As+, Ds  etc.
-        Encoding: 0000_00aa_dddd_mmmm
-          aa = As index (0=r4, 1=r5, 2=r2, 3=r3)
-          dddd = Ds index (see _DSP_DATA_REG_MAP)
-          mmmm = addressing mode:
-            0 = @As+Ix, Ds (word)    2 = @As+Ix, Ds (long)
-            4 = @As, Ds (word)        6 = @As, Ds (long)
-            8 = @-As, Ds (word)      10 = @-As, Ds (long)
-           12 = @As+, Ds (word)      14 = @As+, Ds (long)
-        """
+        """Encode the single-data MOVS forms in the F4xx-F7xx space."""
         if len(ops) != 2:
-            raise ValueError(f"MOVS requires 2 operands: {mnem} {ops}")
-
+            raise ValueError("MOVS requires two operands")
+        is_store = ops[1].strip().startswith('@')
+        addr_op = ops[1 if is_store else 0].strip().lower()
+        data_reg = ops[0 if is_store else 1].strip().lower()
         is_long = mnem.endswith('.l')
-        addr_op = ops[0].strip()
-        data_reg = ops[1].strip().lower()
-
-        as_idx = None
-        mode = None
-
-        # @As+Ix, Ds (indexed)
-        if addr_op.startswith('@') and '+ix' in addr_op.lower():
-            reg_part = addr_op[1:].lower().replace('+ix', '').strip()
-            as_idx = self._DSP_ADDR_REG_MAP.get(reg_part)
-            mode = 2 if is_long else 0
-        # @As, Ds (direct)
-        elif addr_op.startswith('@') and '+' not in addr_op and '-' not in addr_op:
-            reg_part = addr_op[1:].strip().lower()
-            as_idx = self._DSP_ADDR_REG_MAP.get(reg_part)
-            mode = 6 if is_long else 4
-        # @-As, Ds (pre-decrement)
-        elif addr_op.startswith('@-'):
-            reg_part = addr_op[2:].strip().lower()
-            as_idx = self._DSP_ADDR_REG_MAP.get(reg_part)
-            mode = 10 if is_long else 8
-        # @As+, Ds (post-increment)
+        if addr_op.startswith('@-'):
+            reg, mode = addr_op[2:], 0
         elif addr_op.startswith('@') and addr_op.endswith('+'):
-            reg_part = addr_op[1:-1].strip().lower()
-            as_idx = self._DSP_ADDR_REG_MAP.get(reg_part)
-            mode = 14 if is_long else 12
-
-        if as_idx is None or mode is None:
-            raise ValueError(f"Cannot parse MOVS address operand: {addr_op!r}")
-
+            reg, mode = addr_op[1:-1], 8
+        elif addr_op.startswith('@') and '+' not in addr_op:
+            reg, mode = addr_op[1:], 4
+        else:
+            raise ValueError(f"Unsupported MOVS address operand: {addr_op!r}")
+        as_idx = self._DSP_ADDR_REG_MAP.get(reg)
         ds_idx = self._DSP_DATA_REG_MAP.get(data_reg)
-        if ds_idx is None:
-            raise ValueError(f"Unknown DSP data register: {data_reg!r}")
-
-        self.emit16((as_idx << 8) | (ds_idx << 4) | mode)
+        if as_idx is None or ds_idx is None:
+            raise ValueError(f"Invalid MOVS operands: {ops}")
+        self.emit16(0xF400 | (as_idx << 8) | (ds_idx << 4)
+                    | mode | (2 if is_long else 0) | int(is_store))
 
     def _emit_movx_movy(self, mnem: str, ops: List[str]):
         """Encode MOVX.W / MOVY.W / MOVX.L / MOVY.L instructions.

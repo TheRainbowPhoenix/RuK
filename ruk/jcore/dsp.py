@@ -1,248 +1,8 @@
-"""
-DSP instruction handler for the SH4AL-DSP (SH7305).
+"""SH DSP support under reconstruction.
 
-This module implements the three DSP instruction families used by the
-Casio SH7305 CPU (a custom SH4AL-DSP variant):
-
-    1. MOVS.W / MOVS.L   - single memory instructions   (0x0000-0x03FF)
-    2. MOVX.W / MOVY.W   - double memory instructions   (0xF4xx, 0xF5xx)
-    3. PADD / PSUB / PMULS / PCLR / PCOPY / PSHL / ...  (0xF0xx)
-
-All three families are only dispatched to this module when the SR.DSP
-bit (bit 12 of SR) is set.  When SR.DSP = 0, the same encodings decode
-as standard SH-4 instructions (NOP / PREF / ICBI / etc.).
-
-The encodings, register tables, and dispatch logic are reverse-engineered
-from libCPU73050.dylib (the Casio fx-CG50 / Classpad II emulator binary)
-with cross-reference against the SH-4 DSP manual and the user's test
-program (SigmaDelta2 add-in) found in the conversation history.
-
-==============================================================================
-ENCODING REFERENCE  (from libCPU73050 decomp + SH-4 DSP manual)
-==============================================================================
-
-MOVS single memory instructions
--------------------------------
-Format:  0000_00aa_dddd_mmmm   (0x0000-0x03FF, mode != 0)
-
-   aa    = As index (0-3)   -> R4 / R5 / R2 / R3   (DSPSingleAddrReg_Table)
-   dddd  = Ds index (0-15)  -> DSP data register   (DSPSingleDataReg_Table)
-   mmmm  = mode (0-15)      -> addressing mode
-
-The 16 modes (matching DSPSingleInstr_Table in libCPU73050):
-
-    mode | mnemonic           | operation
-    -----+--------------------+-----------------------------------------
-     0   | MOVS.W @As+Ix, Ds  | Ds <- sext16(M[As+Ix])      (indexed W load)
-     1   | MOVS.W Ds, @As+Ix  | M[As+Ix] <- Ds[31:16]       (indexed W store)
-     2   | MOVS.L @As+Ix, Ds  | Ds <- M[As+Ix]              (indexed L load)
-     3   | MOVS.L Ds, @As+Ix  | M[As+Ix] <- Ds              (indexed L store)
-     4   | MOVS.W @As, Ds     | Ds <- sext16(M[As])         (direct W load)
-     5   | MOVS.W Ds, @As     | M[As] <- Ds[31:16]          (direct W store)
-     6   | MOVS.L @As, Ds     | Ds <- M[As]                 (direct L load)
-     7   | MOVS.L Ds, @As     | M[As] <- Ds                 (direct L store)
-     8   | MOVS.W @-As, Ds    | As <- As-2; Ds <- sext16(M[As])
-     9   | MOVS.W Ds, @-As    | As <- As-2; M[As] <- Ds[31:16]
-    10   | MOVS.L @-As, Ds    | As <- As-4; Ds <- M[As]
-    11   | MOVS.L Ds, @-As    | As <- As-4; M[As] <- Ds
-    12   | MOVS.W @As+, Ds    | Ds <- sext16(M[As]); As <- As+2
-    13   | MOVS.W Ds, @As+    | M[As] <- Ds[31:16]; As <- As+2
-    14   | MOVS.L @As+, Ds    | Ds <- M[As]; As <- As+4
-    15   | MOVS.L Ds, @As+    | M[As] <- Ds; As <- As+4
-
-Note: modes 0-3 ("indexed") use the Ix register (R0 by convention on
-SH4AL-DSP, since the libCPU73050 DSPSingleRegister_Table[0] is a no-op).
-The Ix register is added to As to form the effective address.
-
-Word load/store semantics depend on the destination register type
-(from DSPStoreMode_Table in libCPU73050):
-
-    Register        | Load (M -> Ds)              | Store (Ds -> M)
-    ----------------+------------------------------+---------------------------
-    X0/X1/Y0/Y1/M0/M1 | Ds = sext16(value) << 16  | M = Ds[31:16]
-                    | (value in upper 16 bits)    |
-    A0/A1           | Ds = sext16(value)          | M = Ds[15:0]
-                    | (value in lower 16 bits,    |
-                    |  sign-extended to 32 bits)  |
-    A0G/A1G         | Ds = value & 0xFF (byte)    | M = Ds[7:0]
-
-For long loads/stores, all 32 bits are transferred (no rearrangement).
-
-DSP register file
------------------
-The libCPU73050 CPU state struct stores DSP registers at byte offsets
-8 * index, with a dirty-flag byte at 8 * index + 4.  The mapping from
-internal index to RuK register name (kept in cpu.regs dict) is:
-
-    Index  Register  Description
-    -----  --------  -----------
-     39    a0        Accumulator 0 (32-bit)
-     40    a1        Accumulator 1 (32-bit)
-     41    a0g       Accumulator 0 guard bits (8-bit signed)
-     42    a1g       Accumulator 1 guard bits
-     43    x0        X-bus data register 0 (32-bit, upper 16 = data)
-     44    x1        X-bus data register 1
-     45    y0        Y-bus data register 0
-     46    y1        Y-bus data register 1
-     47    m0        Multiplier register 0
-     48    m1        Multiplier register 1
-    rs, re   - Repeat start/end address
-    rc       - Repeat count
-    dsr      - DSP status register
-
-DSPSingleDataReg_Table[16]  (from libCPU73050 at 0xA0298):
-    db 5 dup(0), 28h, 0, 27h, 2Dh, 2Eh, 2Fh, 30h, 2Bh, 2Ah, 2Ch, 29h
-    Index 0..4, 6 are invalid (0).
-    Index 5  -> 0x28 (40 = a1)
-    Index 7  -> 0x27 (39 = a0)
-    Index 8  -> 0x2D (45 = y0)
-    Index 9  -> 0x2E (46 = y1)
-    Index 10 -> 0x2F (47 = m0)
-    Index 11 -> 0x30 (48 = m1)
-    Index 12 -> 0x2B (43 = x0)
-    Index 13 -> 0x2A (42 = a1g)
-    Index 14 -> 0x2C (44 = x1)
-    Index 15 -> 0x29 (41 = a0g)
-
-DSPSingleAddrReg_Table[4]  (from libCPU73050 at 0xA02D9):
-    db 4, 5, 2, 3      ; -> R4, R5, R2, R3
-
-DSPStoreMode_Table[49]  (from libCPU73050 at 0xA02A8):
-    db 27h dup(0), 2 dup(1), 2 dup(2), 6 dup(0)
-    Indices 39, 40 (a0, a1)     -> mode 1 (lower 16 bits)
-    Indices 41, 42 (a0g, a1g)   -> mode 2 (byte)
-    All others                  -> mode 0 (upper 16 bits)
-
-
-DSP operation instructions (0xF0xx)
------------------------------------
-Format:  1111_0000_xxxx_xxxx   (0xF000-0xF0FF)
-
-The low byte is split into:
-    bits 0-3 : destination register index (DU/DG table)
-    bits 4-5 : SY register index (DSPOperationSYReg_Table)
-    bits 6-7 : SX register index (DSPOperationSXReg_Table)
-    bits 8-15: 0xF0 (operation family marker)
-
-The operation type is determined by bits 4-7 combined, dispatched through
-the 256-entry DSPOperationInstr_Table at 0xA0500 in libCPU73050.
-
-Operation tables:
-    DSPOperationSXReg_Table[4]  = [0x2D, 0x2E, 0x27, 0x28]  -> y0, y1, a0, a1
-    DSPOperationSYReg_Table[4]  = [0x2F, 0x30, 0x2B, 0x2C]  -> m0, m1, x0, x1
-    DSPOperationDGReg_Table[4]  = [0x2B, 0x2C, 0x27, 0x28]  -> x0, x1, a0, a1
-    DSPOperationDUReg_Table[4]  = [0x2D, 0x2F, 0x27, 0x28]  -> y0, m0, a0, a1
-
-The DSPOperationInstr_Table dispatches to specific handlers like:
-    CPU_DSP_PSHL_IMM, CPU_DSP_PSHA_IMM, CPU_DSP_PMULS_X0_Y0_PCLR,
-    CPU_DSP_PMULS_X0_Y0_PSUB, CPU_DSP_PMULS_X0_Y0_PADD,
-    CPU_DSP_PADD_SX_SY_DZ, CPU_DSP_PSUB_SX_SY_DZ, CPU_DSP_PCMP_SX_SY,
-    CPU_DSP_PABS_SX_DZ, CPU_DSP_PDEC_SX_DZ, CPU_DSP_PCLR_DZ,
-    CPU_DSP_PSHA_SX_SY_DZ, CPU_DSP_PAND_SX_SY_DZ, CPU_DSP_PRND_SX_DZ,
-    CPU_DSP_PINC_SX_DZ, CPU_DSP_PDMSB_PSWAP_SX_DZ, CPU_DSP_PSUBC_SX_SY_DZ,
-    CPU_DSP_PXOR_SX_SY_DZ, CPU_DSP_PADDC_SX_SY_DZ, CPU_DSP_POR_SX_SY_DZ,
-    CPU_DSP_PNEG_SX_DZ, CPU_DSP_PSTS_MACH_DZ, CPU_DSP_PCOPY_SX_DZ,
-    CPU_DSP_PSTS_MACL_DZ, CPU_DSP_PLDS_DZ_MACH, CPU_DSP_PCOPY_SY_DZ,
-    CPU_DSP_PLDS_DZ_MACL, plus DCT/DCF variants of each.
-
-DCT = "decrement counter and test" (execute if RC != 0 after decrement)
-DCF = "decrement counter and test false" (execute if RC == 0 after decrement)
-
-CPU_DSP_OPERATION (the entry-point wrapper at 0x28FD2 in libCPU73050):
-    1. Check SR.DSP bit (0x1000).  If 0, raise CPU_INVALID.
-    2. If (dword_BA900 & 0x10) && (dword_BA900 & 0x2000): dword_BA858 += 2.
-       (This increments the repeat-loop counter when in a repeat block.)
-    3. Call qword_5F4190 (pre-processing callback).
-    4. Call CPU_DSPInstructionOperation - computes results into the six
-       "result slot" globals:
-           dword_BA944 = dest reg 1 index (or 255 = no dest)
-           dword_BA948 = value for dest 1
-           dword_BA94C = guard value for dest 1 (only used if dest is a0/a1)
-           dword_BA950 = dest reg 2 index (or 255 = no dest)
-           dword_BA954 = value for dest 2
-           dword_BA958 = guard value for dest 2
-    5. Call CPU_DSPInstructionDouble - handles parallel MOVX/MOVY memory
-       access (for opcodes that combine a compute op with a memory op).
-    6. Writeback: for each dest slot, if index < 0x31 (49):
-           - Write the value to the register file at offset 8 * index
-           - Mark the dirty flag at offset 8 * index + 4
-           - If dest is 39 (a0) or 40 (a1), also write the guard value
-             to offset 8 * index + 16 and mark its dirty flag.
-
-This Python port models the result slots as local variables and writes
-them back to cpu.regs directly, skipping the dirty-flag bookkeeping
-(which is only used by the GUI's "highlight changed registers" feature).
-
-MOVX / MOVY double memory instructions (0xF4xx, 0xF5xx)
--------------------------------------------------------
-Format:  1111_01xx_xxxx_xxxx
-
-These access both the X and Y memory buses in parallel (XRAM and YRAM
-on the SH7305, both 512 KB at 0xE5000000 and 0xE5010000 respectively).
-The 64-entry DSPDoubleInstr_Table at 0xA02DD dispatches to handlers
-like CPU_DSP_MOVXW_IAXY_DXY, CPU_DSP_MOVYW_IAYX_DYX, etc.
-
-Notation in handler names:
-   IAX  = Index Address X-bus       (pre-decrement, X-bus, no Y-bus op)
-   IAXY = Index Address X+Y buses   (post-increment both)
-   IAY  = Index Address Y-bus only
-   IAXYIX = ... post-increment X-bus only
-   DAX  = Direct Address X-bus
-   DAY  = Direct Address Y-bus
-   DXY  = Direct X+Y (both buses, no address modification)
-   DYX  = same, Y-bus word first
-
-MOVX accesses XRAM via the X bus; MOVY accesses YRAM via the Y bus.
-Both can be combined with a parallel operation (NOPX/NOPY when no
-memory access on that bus).
-
-
-DSP MOVS instruction encoding (0x0xEx family):
-  0000_0AAS_DDDD_CCCC
-
-  AA  (bits 10-9): address register select (0->R4, 1->R5, 2->R2, 3->R3)
-  S   (bit 8):     index modifier
-  DDDD (bits 7-4): data register select (see DSP_DATA_REG_MAP)
-  CCCC (bits 3-0): case/mode select (1-15, see DSP_MOVS_MODES)
-
-The 15 MOVS modes:
-  1: MOVS.W @As+Ix, Ds   (indexed load word)
-  2: MOVS.W Ds, @As+Ix   (indexed store word)
-  3: MOVS.L @As+Ix, Ds   (indexed load long)
-  4: MOVS.L Ds, @As+Ix   (indexed store long)
-  5: MOVS.W @As, Ds      (load word)
-  6: MOVS.W Ds, @As       (store word)
-  7: MOVS.L @As, Ds       (load long)
-  8: MOVS.L Ds, @As       (store long)
-  9: MOVS.W @-As, Ds      (pre-decrement load word)
- 10: MOVS.W Ds, @-As      (pre-decrement store word)
- 11: MOVS.L @-As, Ds      (pre-decrement load long)
- 12: MOVS.L Ds, @-As      (pre-decrement store long)
- 13: MOVS.W @As+, Ds      (post-increment load word)
- 14: MOVS.W Ds, @As+      (post-increment store word)
- 15: MOVS.L @As+, Ds      (post-increment load long)
-
-DSP data register mapping (DDDD -> register name):
-  5:  rc
-  7:  re
-  8:  a0
-  9:  a0g
- 10:  a1
- 11:  a1g
- 12:  y0
- 13:  x1
- 14:  y1
- 15:  x0
-
-DSP address register mapping (AA -> SH-4 register):
-  0: R4
-  1: R5
-  2: R2
-  3: R3
-
-DSP operation instructions (PSUB, PADD, PMULS, etc.) have a different
-encoding and are dispatched via a large jump table in the libCPU73050
-decomp.  We implement the most common ones.
+MOVS and X/Y moves use the extracted CPU73050 and Sdsha decoder tables.
+Standalone PMULS is implemented; the older P-operation helpers below are
+experimental and are not dispatched.
 """
 
 from typing import Optional
@@ -258,22 +18,8 @@ DSP_SINGLE_ADDR_REG_TABLE = ['r4', 'r5', 'r2', 'r3']
 # Ds index -> RuK DSP register name (DSPSingleDataReg_Table)
 # Index 0..4, 6 are invalid (None); the rest map to specific DSP regs.
 DSP_SINGLE_DATA_REG_TABLE = [
-    None,    # 0  (invalid)
-    None,    # 1  (invalid)
-    None,    # 2  (invalid)
-    None,    # 3  (invalid)
-    None,    # 4  (invalid)
-    'a1',    # 5  -> 0x28
-    None,    # 6  (invalid)
-    'a0',    # 7  -> 0x27
-    'y0',    # 8  -> 0x2D
-    'y1',    # 9  -> 0x2E
-    'm0',    # 10 -> 0x2F
-    'm1',    # 11 -> 0x30
-    'x0',    # 12 -> 0x2B
-    'a1g',   # 13 -> 0x2A
-    'x1',    # 14 -> 0x2C
-    'a0g',   # 15 -> 0x29
+    None, None, None, None, None, 'a1', None, 'a0',
+    'x0', 'x1', 'y0', 'y1', 'm0', 'a1g', 'm1', 'a0g',
 ]
 
 # SX register index -> RuK DSP register name (DSPOperationSXReg_Table)
@@ -378,39 +124,10 @@ SR_DSP_BIT = 0x1000
 
 
 def is_dsp_instruction(op_val: int) -> bool:
-    """Check if an opcode matches a DSP encoding pattern.
-
-    NOTE: This checks the ENCODING only, not the SR.DSP bit.  The
-    SR.DSP check is performed in handle_dsp_instruction.
-
-    DSP encoding ranges:
-      * 0x0000-0x03FF (Ds index valid): MOVS single memory
-        - 0x0000 itself is NOP (Ds index 0 is invalid)
-        - Mode 0 has low nibble = 0 but is a valid MOVS (indexed load
-          word) when the Ds index is valid
-      * 0xF000-0xF0FF                       : DSP operations
-      * 0xF400-0xF7FF                       : MOVX/MOVY double memory
-        - 0xF4xx = addr_pair 0 (R4/R6)
-        - 0xF5xx = addr_pair 1 (R0/R7)
-        - 0xF6xx = addr_pair 2 (R5/R2)
-        - 0xF7xx = addr_pair 3 (R1/R3)
-    """
-    # DSP operation instructions: 0xF0xx
-    if (op_val & 0xFF00) == 0xF000:
-        return True
-    # DSP double data instructions: 0xF4xx, 0xF5xx, 0xF6xx, 0xF7xx
-    if (op_val & 0xFC00) == 0xF400:
-        return True
-    # DSP single data instructions: 0x0000-0x03FF
-    # The Ds index (bits 4-7) must be valid (not in {0,1,2,3,4,6}).
-    # This naturally excludes 0x0000 (NOP) and other standard SH-4
-    # instructions in the 0x0000-0x03FF range whose bits 4-7 don't
-    # decode to a valid DSP data register.
-    if (op_val & 0xFC00) == 0x0000:
-        ds_idx = (op_val >> 4) & 0xF
-        if ds_idx < len(DSP_SINGLE_DATA_REG_TABLE) and DSP_SINGLE_DATA_REG_TABLE[ds_idx] is not None:
-            return True
-    return False
+    """Recognize implemented MOVS encodings, independent of SR.DSP."""
+    return (op_val == 0xF800 or (op_val & 0xFC00) == 0xF000 or
+            ((op_val & 0xFC00) == 0xF400
+             and DSP_SINGLE_DATA_REG_TABLE[(op_val >> 4) & 15] is not None))
 
 
 def _sr_dsp_is_set(cpu) -> bool:
@@ -433,49 +150,177 @@ def handle_dsp_instruction(cpu, op_val: int) -> bool:
     is clear, the opcode is not treated as DSP and False is returned
     (so the standard SH-4 decoder can handle it).
     """
-    # DSP operation instructions (0xF0xx)
-    if (op_val & 0xFF00) == 0xF000:
-        if not _sr_dsp_is_set(cpu):
-            return False
-        return _handle_dsp_operation(cpu, op_val)
-
-    # DSP double data instructions (0xF4xx, 0xF5xx, 0xF6xx, 0xF7xx)
-    if (op_val & 0xFC00) == 0xF400:
-        if not _sr_dsp_is_set(cpu):
-            return False
-        return _handle_movx_movy(cpu, op_val)
-
-    # DSP single data instructions (0x0000-0x03FF)
-    # Valid only when the Ds index (bits 4-7) maps to a real DSP
-    # register.  This excludes 0x0000 (NOP) and standard SH-4
-    # instructions whose bits 4-7 don't decode to a DSP data reg.
-    if (op_val & 0xFC00) == 0x0000:
-        ds_idx = (op_val >> 4) & 0xF
-        if ds_idx >= len(DSP_SINGLE_DATA_REG_TABLE) or DSP_SINGLE_DATA_REG_TABLE[ds_idx] is None:
-            return False  # invalid Ds index -- not a MOVS
-        if not _sr_dsp_is_set(cpu):
-            return False
+    if not _sr_dsp_is_set(cpu):
+        return False
+    if op_val == 0xF800:
+        return _execute_standalone_pop(cpu, cpu.mem.read16(_u32(cpu.pc + 2)))
+    if (op_val & 0xFC00) == 0xF000:
+        _parallel_moves(cpu, op_val)
+        cpu.pc = _u32(cpu.pc + 2)
+        return True
+    if is_dsp_instruction(op_val):
         return _handle_movs(cpu, op_val)
-
     return False
+
+
+def _execute_standalone_pop(cpu, word):
+    """Execute validated F800 P-operations; return False for unsupported words."""
+    # CPU_DSPInstructionOperation cases 40-4f, PMULS Se,Sf,Dg.
+    if (word & 0xf000) == 0x4000 and (word & 0x00f3) == 0:
+        se = ('x0', 'x1', 'y0', 'a1')[(word >> 10) & 3]
+        sf = ('y0', 'y1', 'x0', 'a1')[(word >> 8) & 3]
+        dest = ('m0', 'm1', 'a0', 'a1')[(word >> 2) & 3]
+        a = _i16(cpu.regs[se] >> 16)
+        b = _i16(cpu.regs[sf] >> 16)
+        value = 0x7fffffff if (cpu.regs['sr'] & 2 and a == -32768 and b == -32768) else _u32(a * b * 2)
+        cpu.regs[dest] = value
+        if dest in ('a0', 'a1'):
+            cpu.regs[dest + 'g'] = 0xffffffff if value & 0x80000000 else 0
+        cpu.pc = _u32(cpu.pc + 4)
+        return True
+    return False
+
+
+# Sdsha DSP X/Y slot decode, IDs 323-360; indexed by low six bits.
+# IDs are stable references to the extracted instruction-format table.
+_XY_SLOTS = (
+ (359,360),(359,344),(359,345),(359,346),(326,360),(323,341),(323,342),(323,343),
+ (327,360),(324,341),(324,342),(324,343),(328,360),(325,341),(325,342),(325,343),
+ (359,360),(359,350),(359,351),(359,352),(335,360),(323,347),(323,348),(323,349),
+ (336,360),(324,347),(324,348),(324,349),(337,360),(325,347),(325,348),(325,349),
+ (359,360),(359,353),(359,354),(359,355),(332,360),(329,341),(329,342),(329,343),
+ (333,360),(330,341),(330,342),(330,343),(334,360),(331,341),(331,342),(331,343),
+ (359,360),(359,356),(359,357),(359,358),(338,360),(329,347),(329,348),(329,349),
+ (339,360),(330,347),(330,348),(330,349),(340,360),(331,347),(331,348),(331,349),
+)
+
+
+def _parallel_moves(cpu, word):
+    """Execute the two DSP memory slots with operands sampled before writes."""
+    x_id, y_id = _XY_SLOTS[word & 63]
+    both = x_id != 359 and y_id != 360
+    sel = (word >> 6) & 3
+    adr = (word >> 8) & 3
+    before = list(cpu.regs._r)
+    sr = cpu.regs['sr']
+    mod = cpu.regs['mod']
+    updates = []
+    loads = []
+    stores = []
+    for axis, ident in (('x', x_id), ('y', y_id)):
+        if ident in (359, 360):
+            continue
+        if axis == 'x':
+            reg = (4 + ((word >> 9) & 1)) if both else (4, 0, 5, 1)[adr]
+            if ident <= 325: data, kind, offset = ('x0', 'x1')[(word >> 7) & 1], 'load', ident-323
+            elif ident <= 328: data, kind, offset = ('x0','y0','x1','y1')[sel], 'load', ident-326
+            elif ident <= 331: data, kind, offset = ('a0','a1')[(word >> 7) & 1], 'store', ident-329
+            elif ident <= 334: data, kind, offset = ('a0','x0','a1','x1')[sel], 'store', ident-332
+            elif ident <= 337: data, kind, offset = ('x0','y0','x1','y1')[sel], 'load', ident-335
+            else: data, kind, offset = ('a0','x0','a1','x1')[sel], 'store', ident-338
+            long = ident in range(335, 341)
+            inc = before[8]
+            modulo = (sr & 0xc00) == 0x400
+        else:
+            reg = (6 + ((word >> 8) & 1)) if both else (6, 7, 2, 3)[adr]
+            if ident <= 343: data, kind, offset = ('y0','y1')[(word >> 6) & 1], 'load', ident-341
+            elif ident <= 346: data, kind, offset = ('y0','y1','x0','x1')[sel], 'load', ident-344
+            elif ident <= 349: data, kind, offset = ('a0','a1')[(word >> 6) & 1], 'store', ident-347
+            elif ident <= 352: data, kind, offset = ('a0','a1','y0','y1')[sel], 'store', ident-350
+            elif ident <= 355: data, kind, offset = ('y0','y1','x0','x1')[sel], 'load', ident-353
+            else: data, kind, offset = ('a0','a1','y0','y1')[sel], 'store', ident-356
+            long = ident in range(353, 359)
+            inc = before[9] & 0xffff
+            modulo = bool(sr & 0x800)
+        size = 4 if long else 2
+        address = before[reg]
+        if kind == 'load':
+            value = cpu.mem.read32(address) if long else cpu.mem.read16(address) << 16
+            loads.append((data, value))
+        else:
+            value = cpu.regs[data]
+            stores.append((address, size, value if long else value >> 16))
+        if offset:
+            if modulo and (address & 0xffff) == ((mod >> 16) & 0xffff):
+                after = (address & 0xffff0000) | (mod & 0xffff)
+            else:
+                delta = size if offset == 1 else inc
+                after = _u32(address + delta)
+                if axis == 'y':
+                    after = (address & 0xffff0000) | (after & 0xffff)
+            updates.append((reg, after))
+    for address, size, value in stores:
+        (cpu.mem.write32 if size == 4 else cpu.mem.write16)(address, value)
+    for data, value in loads:
+        cpu.regs[data] = value
+    for reg, value in updates:
+        cpu.regs[reg] = value
 
 
 # ============================================================================
 # MOVS: single memory instructions (all 16 modes implemented)
 # ============================================================================
 
-# Index register for "indexed" MOVS modes (0-3).  On the SH4AL-DSP the
-# Ix register is implicit; we use R0 since DSPSingleRegister_Table[0]
-# in libCPU73050 is the no-op slot (i.e. no Ix register is selected for
-# the indexed access).  In practice, indexed MOVS modes are rarely
-# used by the Casio OS, so R0 as Ix is a safe default.
-MOVS_INDEX_REG = 'r0'
+# Indexed MOVS transfers at As, then adds R8 to As.
+MOVS_INDEX_REG = 'r8'
+
+
+# CPU73050 I_Table0_7410 / I_Table_Other transfer encodings.
+_DATA_TRANSFER = {0x6: 'dsr', 0x7: 'a0', 0x8: 'x0',
+                  0x9: 'x1', 0xa: 'y0', 0xb: 'y1'}
+_CONTROL_TRANSFER = {0x5: 'mod', 0x6: 'rs', 0x7: 're'}
+
+
+def handle_dsp_transfer(cpu, word: int) -> bool:
+    """Execute register/memory DSP transfers using CPU73050 encodings."""
+    if word in (0x0088, 0x0098, 0x00c8):
+        if not _sr_dsp_is_set(cpu):
+            return False
+        mode = {0x0088: 0, 0x0098: 0x400, 0x00c8: 0x800}[word]
+        cpu.regs['sr'] = (cpu.regs['sr'] & ~0xc00) | mode
+        cpu.pc = _u32(cpu.pc + 2)
+        return True
+    top = word >> 12
+    low = word & 0xff
+    n = (word >> 8) & 15
+    field, sub = low >> 4, low & 15
+    if top == 0 and sub == 0xa:
+        name = _DATA_TRANSFER.get(field)
+        action = 'store_reg'
+    elif top == 0 and sub == 2:
+        name = _CONTROL_TRANSFER.get(field)
+        action = 'store_reg'
+    elif top == 4 and sub in (2, 6, 10):
+        name = _DATA_TRANSFER.get(field)
+        action = {2: 'store_mem', 6: 'load_mem', 10: 'load_reg'}[sub]
+    elif top == 4 and sub in (3, 7, 14):
+        name = _CONTROL_TRANSFER.get(field)
+        action = {3: 'store_mem', 7: 'load_mem', 14: 'load_reg'}[sub]
+    else:
+        return False
+    if name is None or not _sr_dsp_is_set(cpu):
+        return False
+    if action == 'store_reg':
+        cpu.regs[n] = cpu.regs[name]
+    elif action == 'load_reg':
+        cpu.regs[name] = cpu.regs[n]
+    elif action == 'store_mem':
+        address = _u32(cpu.regs[n] - 4)
+        cpu.mem.write32(address, cpu.regs[name])
+        cpu.regs[n] = address
+    else:
+        address = cpu.regs[n]
+        value = cpu.mem.read32(address)
+        cpu.regs[name] = value
+        cpu.regs[n] = _u32(address + 4)
+    cpu.pc = _u32(cpu.pc + 2)
+    return True
 
 
 def _handle_movs(cpu, op_val: int) -> bool:
     """Handle MOVS.W / MOVS.L single memory instructions.
 
-    Encoding: 0000_00aa_dddd_mmmm
+    Encoding: 1111_01aa_dddd_mmmm
         aa    = As index (0-3) -> R4/R5/R2/R3
         dddd  = Ds index (0-15) -> DSP data register
         mmmm  = mode (0-15)
@@ -503,18 +348,18 @@ def _handle_movs(cpu, op_val: int) -> bool:
     # Decode mode properties
     is_store = (mode & 1) == 1                              # odd modes = stores
     is_long = mode in (2, 3, 6, 7, 10, 11, 14, 15)         # .L accesses
-    is_indexed = mode in (0, 1, 2, 3)                       # @As+Ix
-    is_pre_decrement = mode in (8, 9, 10, 11)               # @-As
-    is_post_increment = mode in (12, 13, 14, 15)            # @As+
+    is_indexed = mode in (12, 13, 14, 15)                       # @As+Ix
+    is_pre_decrement = mode in (0, 1, 2, 3)               # @-As
+    is_post_increment = mode in (8, 9, 10, 11)            # @As+
 
     size = 4 if is_long else 2
 
     # Compute the effective address.
-    # - Indexed modes: eff = As + Ix (where Ix = R0)
-    # - Direct / pre-dec / post-inc: eff = As (with side-effects on As)
+    # Indexed, direct and postincrement modes access As; predecrement
+    # modes access As - size. Indexed modes update As after the access.
     if is_indexed:
         ix_val = cpu.regs[MOVS_INDEX_REG] & 0xFFFFFFFF
-        eff_addr = _u32(as_val + ix_val)
+        eff_addr = as_val
     else:
         eff_addr = as_val
 
@@ -529,8 +374,9 @@ def _handle_movs(cpu, op_val: int) -> bool:
         _movs_load(cpu, eff_addr, data_reg, is_long)
 
     if is_post_increment:
-        # Increment As AFTER the access
         cpu.regs[addr_reg] = _u32(as_val + size)
+    elif is_indexed:
+        cpu.regs[addr_reg] = _u32(as_val + ix_val)
 
     cpu.pc = _u32(cpu.pc + 2)
     return True
@@ -545,8 +391,7 @@ def _movs_load(cpu, addr: int, data_reg: str, is_long: bool):
         to -((int)result < 0) (i.e., 0xFFFFFFFF if negative, else 0)
       - Mode 2 (A0G/A1G): result = (char)v7 (sign-extended byte)
 
-    For long loads, all 32 bits are transferred verbatim (no
-    rearrangement, no guard bit update).
+    Long loads transfer all 32 bits; accumulator guard bits are sign extended.
     """
     if is_long:
         # Long load: transfer all 32 bits verbatim.
@@ -554,6 +399,8 @@ def _movs_load(cpu, addr: int, data_reg: str, is_long: bool):
         if isinstance(val, (bytes, bytearray)):
             val = int.from_bytes(val, 'big')
         cpu.regs[data_reg] = _u32(val)
+        if data_reg in ('a0', 'a1'):
+            cpu.regs[data_reg + 'g'] = 0xFFFFFFFF if val & 0x80000000 else 0
         return
 
     # Word load: 16-bit value placed according to register type.

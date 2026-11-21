@@ -1,3 +1,7 @@
 cp400
 cg50
 *.pyc
+sh4cc
+bare_metal
+test_output
+asm
