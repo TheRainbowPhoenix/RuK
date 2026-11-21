@@ -1,8 +1,8 @@
 """SH DSP support under reconstruction.
 
 MOVS and X/Y moves use the extracted CPU73050 and Sdsha decoder tables.
-Standalone PMULS is implemented; the older P-operation helpers below are
-experimental and are not dispatched.
+Standalone PMULS and logical P-operations are implemented; the older
+P-operation helpers below are experimental and are not dispatched.
 """
 
 from typing import Optional
@@ -117,17 +117,20 @@ def _sext8_to_32(val) -> int:
 # Encoding predicates
 # ============================================================================
 
-# SR bit 12: DSP mode enable.  When set, opcodes 0x0000-0x03FF (with
-# non-zero low nibble) are interpreted as MOVS, and 0xF0xx / 0xF4xx /
-# 0xF5xx are interpreted as DSP operations / double data.
+# SR bit 12 enables DSP instructions on the supported DSP personality.
 SR_DSP_BIT = 0x1000
 
 
 def is_dsp_instruction(op_val: int) -> bool:
-    """Recognize implemented MOVS encodings, independent of SR.DSP."""
-    return (op_val == 0xF800 or (op_val & 0xFC00) == 0xF000 or
-            ((op_val & 0xFC00) == 0xF400
-             and DSP_SINGLE_DATA_REG_TABLE[(op_val >> 4) & 15] is not None))
+    """Recognize implemented DSP prefixes, independent of SR.DSP."""
+    return (
+        op_val == 0xF800
+        or (op_val & 0xFC00) == 0xF000
+        or (
+            (op_val & 0xFC00) == 0xF400
+            and DSP_SINGLE_DATA_REG_TABLE[(op_val >> 4) & 15] is not None
+        )
+    )
 
 
 def _sr_dsp_is_set(cpu) -> bool:
@@ -165,6 +168,47 @@ def handle_dsp_instruction(cpu, op_val: int) -> bool:
 
 def _execute_standalone_pop(cpu, word):
     """Execute validated F800 P-operations; return False for unsupported words."""
+    # Sdsha logical operations and their DCT / DCF forms.
+    opcode = word >> 8
+    logical_base = next((base for base in (0x95, 0xA5, 0xB5)
+                         if base <= opcode <= base + 2), None)
+    if logical_base is not None:
+        dest = (None, None, None, None, None, 'a1', None, 'a0',
+                'x0', 'x1', 'y0', 'y1', 'm0', None, 'm1', None)[word & 15]
+        if dest is None:
+            return False
+        dc = cpu.regs['dsr'] & 1
+        if (opcode == logical_base + 1 and not dc) or (opcode == logical_base + 2 and dc):
+            cpu.pc = _u32(cpu.pc + 4)
+            return True
+        sx = ('x0', 'x1', 'a0', 'a1')[(word >> 6) & 3]
+        sy = ('y0', 'y1', 'm0', 'm1')[(word >> 4) & 3]
+        x_value, y_value = cpu.regs[sx], cpu.regs[sy]
+        if logical_base == 0x95:
+            value = x_value & y_value
+        elif logical_base == 0xA5:
+            value = x_value ^ y_value
+        else:
+            value = x_value | y_value
+        value &= 0xffff0000
+        cpu.regs[dest] = value
+        if dest in ('a0', 'a1'):
+            cpu.regs[dest + 'g'] = 0
+        if opcode == logical_base:
+            negative = int(bool(value & 0x80000000))
+            zero = int(value == 0)
+            dsr = cpu.regs['dsr']
+            condition = (0, negative, zero, 0, 0, 0, 0, 0)[(dsr >> 1) & 7]
+            dsr = (dsr & ~0xf1) | (negative << 5) | (zero << 6) | condition
+            if dsr & 0x100:
+                selector = (dsr >> 9) & 7
+                if selector < 3:
+                    t_bit = (0, negative, zero)[selector]
+                    cpu.regs['sr'] = (cpu.regs['sr'] & ~1) | t_bit
+                dsr |= (negative << 13) | (zero << 14)
+            cpu.regs['dsr'] = dsr
+        cpu.pc = _u32(cpu.pc + 4)
+        return True
     # CPU_DSPInstructionOperation cases 40-4f, PMULS Se,Sf,Dg.
     if (word & 0xf000) == 0x4000 and (word & 0x00f3) == 0:
         se = ('x0', 'x1', 'y0', 'a1')[(word >> 10) & 3]
@@ -172,7 +216,8 @@ def _execute_standalone_pop(cpu, word):
         dest = ('m0', 'm1', 'a0', 'a1')[(word >> 2) & 3]
         a = _i16(cpu.regs[se] >> 16)
         b = _i16(cpu.regs[sf] >> 16)
-        value = 0x7fffffff if (cpu.regs['sr'] & 2 and a == -32768 and b == -32768) else _u32(a * b * 2)
+        saturated = cpu.regs['sr'] & 2 and a == -32768 and b == -32768
+        value = 0x7FFFFFFF if saturated else _u32(a * b * 2)
         cpu.regs[dest] = value
         if dest in ('a0', 'a1'):
             cpu.regs[dest + 'g'] = 0xffffffff if value & 0x80000000 else 0
@@ -184,73 +229,101 @@ def _execute_standalone_pop(cpu, word):
 # Sdsha DSP X/Y slot decode, IDs 323-360; indexed by low six bits.
 # IDs are stable references to the extracted instruction-format table.
 _XY_SLOTS = (
- (359,360),(359,344),(359,345),(359,346),(326,360),(323,341),(323,342),(323,343),
- (327,360),(324,341),(324,342),(324,343),(328,360),(325,341),(325,342),(325,343),
- (359,360),(359,350),(359,351),(359,352),(335,360),(323,347),(323,348),(323,349),
- (336,360),(324,347),(324,348),(324,349),(337,360),(325,347),(325,348),(325,349),
- (359,360),(359,353),(359,354),(359,355),(332,360),(329,341),(329,342),(329,343),
- (333,360),(330,341),(330,342),(330,343),(334,360),(331,341),(331,342),(331,343),
- (359,360),(359,356),(359,357),(359,358),(338,360),(329,347),(329,348),(329,349),
- (339,360),(330,347),(330,348),(330,349),(340,360),(331,347),(331,348),(331,349),
+    (359, 360), (359, 344), (359, 345), (359, 346),
+    (326, 360), (323, 341), (323, 342), (323, 343),
+    (327, 360), (324, 341), (324, 342), (324, 343),
+    (328, 360), (325, 341), (325, 342), (325, 343),
+    (359, 360), (359, 350), (359, 351), (359, 352),
+    (335, 360), (323, 347), (323, 348), (323, 349),
+    (336, 360), (324, 347), (324, 348), (324, 349),
+    (337, 360), (325, 347), (325, 348), (325, 349),
+    (359, 360), (359, 353), (359, 354), (359, 355),
+    (332, 360), (329, 341), (329, 342), (329, 343),
+    (333, 360), (330, 341), (330, 342), (330, 343),
+    (334, 360), (331, 341), (331, 342), (331, 343),
+    (359, 360), (359, 356), (359, 357), (359, 358),
+    (338, 360), (329, 347), (329, 348), (329, 349),
+    (339, 360), (330, 347), (330, 348), (330, 349),
+    (340, 360), (331, 347), (331, 348), (331, 349),
 )
+
+
+def _decode_parallel_slot(axis, ident, word, both):
+    """Return address register, data register, direction, size and update mode."""
+    select = (word >> 6) & 3
+    address_select = (word >> 8) & 3
+    if axis == 'x':
+        address_reg = 4 + ((word >> 9) & 1) if both else (4, 0, 5, 1)[address_select]
+        if ident <= 325:
+            data_reg, direction, mode = ('x0', 'x1')[(word >> 7) & 1], 'load', ident - 323
+        elif ident <= 328:
+            data_reg, direction, mode = ('x0', 'y0', 'x1', 'y1')[select], 'load', ident - 326
+        elif ident <= 331:
+            data_reg, direction, mode = ('a0', 'a1')[(word >> 7) & 1], 'store', ident - 329
+        elif ident <= 334:
+            data_reg, direction, mode = ('a0', 'x0', 'a1', 'x1')[select], 'store', ident - 332
+        elif ident <= 337:
+            data_reg, direction, mode = ('x0', 'y0', 'x1', 'y1')[select], 'load', ident - 335
+        else:
+            data_reg, direction, mode = ('a0', 'x0', 'a1', 'x1')[select], 'store', ident - 338
+        size = 4 if 335 <= ident <= 340 else 2
+    else:
+        address_reg = 6 + ((word >> 8) & 1) if both else (6, 7, 2, 3)[address_select]
+        if ident <= 343:
+            data_reg, direction, mode = ('y0', 'y1')[(word >> 6) & 1], 'load', ident - 341
+        elif ident <= 346:
+            data_reg, direction, mode = ('y0', 'y1', 'x0', 'x1')[select], 'load', ident - 344
+        elif ident <= 349:
+            data_reg, direction, mode = ('a0', 'a1')[(word >> 6) & 1], 'store', ident - 347
+        elif ident <= 352:
+            data_reg, direction, mode = ('a0', 'a1', 'y0', 'y1')[select], 'store', ident - 350
+        elif ident <= 355:
+            data_reg, direction, mode = ('y0', 'y1', 'x0', 'x1')[select], 'load', ident - 353
+        else:
+            data_reg, direction, mode = ('a0', 'a1', 'y0', 'y1')[select], 'store', ident - 356
+        size = 4 if 353 <= ident <= 358 else 2
+    return address_reg, data_reg, direction, size, mode
 
 
 def _parallel_moves(cpu, word):
     """Execute the two DSP memory slots with operands sampled before writes."""
     x_id, y_id = _XY_SLOTS[word & 63]
     both = x_id != 359 and y_id != 360
-    sel = (word >> 6) & 3
-    adr = (word >> 8) & 3
     before = list(cpu.regs._r)
     sr = cpu.regs['sr']
     mod = cpu.regs['mod']
     updates = []
     loads = []
     stores = []
+
     for axis, ident in (('x', x_id), ('y', y_id)):
         if ident in (359, 360):
             continue
-        if axis == 'x':
-            reg = (4 + ((word >> 9) & 1)) if both else (4, 0, 5, 1)[adr]
-            if ident <= 325: data, kind, offset = ('x0', 'x1')[(word >> 7) & 1], 'load', ident-323
-            elif ident <= 328: data, kind, offset = ('x0','y0','x1','y1')[sel], 'load', ident-326
-            elif ident <= 331: data, kind, offset = ('a0','a1')[(word >> 7) & 1], 'store', ident-329
-            elif ident <= 334: data, kind, offset = ('a0','x0','a1','x1')[sel], 'store', ident-332
-            elif ident <= 337: data, kind, offset = ('x0','y0','x1','y1')[sel], 'load', ident-335
-            else: data, kind, offset = ('a0','x0','a1','x1')[sel], 'store', ident-338
-            long = ident in range(335, 341)
-            inc = before[8]
-            modulo = (sr & 0xc00) == 0x400
-        else:
-            reg = (6 + ((word >> 8) & 1)) if both else (6, 7, 2, 3)[adr]
-            if ident <= 343: data, kind, offset = ('y0','y1')[(word >> 6) & 1], 'load', ident-341
-            elif ident <= 346: data, kind, offset = ('y0','y1','x0','x1')[sel], 'load', ident-344
-            elif ident <= 349: data, kind, offset = ('a0','a1')[(word >> 6) & 1], 'store', ident-347
-            elif ident <= 352: data, kind, offset = ('a0','a1','y0','y1')[sel], 'store', ident-350
-            elif ident <= 355: data, kind, offset = ('y0','y1','x0','x1')[sel], 'load', ident-353
-            else: data, kind, offset = ('a0','a1','y0','y1')[sel], 'store', ident-356
-            long = ident in range(353, 359)
-            inc = before[9] & 0xffff
-            modulo = bool(sr & 0x800)
-        size = 4 if long else 2
+        reg, data, direction, size, mode = _decode_parallel_slot(axis, ident, word, both)
+        increment = before[8] if axis == 'x' else before[9] & 0xFFFF
+        modulo = (sr & 0xC00) == 0x400 if axis == 'x' else bool(sr & 0x800)
         address = before[reg]
-        if kind == 'load':
-            value = cpu.mem.read32(address) if long else cpu.mem.read16(address) << 16
+
+        if direction == 'load':
+            value = cpu.mem.read32(address) if size == 4 else cpu.mem.read16(address) << 16
             loads.append((data, value))
         else:
             value = cpu.regs[data]
-            stores.append((address, size, value if long else value >> 16))
-        if offset:
-            if modulo and (address & 0xffff) == ((mod >> 16) & 0xffff):
-                after = (address & 0xffff0000) | (mod & 0xffff)
+            stores.append((address, size, value if size == 4 else value >> 16))
+
+        if mode:
+            if modulo and (address & 0xFFFF) == ((mod >> 16) & 0xFFFF):
+                after = (address & 0xFFFF0000) | (mod & 0xFFFF)
             else:
-                delta = size if offset == 1 else inc
+                delta = size if mode == 1 else increment
                 after = _u32(address + delta)
                 if axis == 'y':
-                    after = (address & 0xffff0000) | (after & 0xffff)
+                    after = (address & 0xFFFF0000) | (after & 0xFFFF)
             updates.append((reg, after))
+
     for address, size, value in stores:
-        (cpu.mem.write32 if size == 4 else cpu.mem.write16)(address, value)
+        write = cpu.mem.write32 if size == 4 else cpu.mem.write16
+        write(address, value)
     for data, value in loads:
         cpu.regs[data] = value
     for reg, value in updates:
