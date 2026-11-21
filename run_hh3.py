@@ -24,6 +24,7 @@ def main():
     parser.add_argument('max_steps', nargs='?', type=int, default=10_000_000)
     parser.add_argument('--btu', action='store_true')
     parser.add_argument('--hle-root', help='read-only directory mounted as fls0')
+    parser.add_argument('--hle-font', help='95 RGB565 glyphs extracted from a compatible OS')
     parser.add_argument('--single-step', action='store_true', help='use the instruction interpreter')
     args = parser.parse_args()
     hh3_path, max_steps = args.hh3_path, args.max_steps
@@ -75,7 +76,8 @@ def main():
     entry = run_hh3(cp, hh3_path,
                     argv=[os.path.basename(hh3_path)],
                     envp=None if args.hle_root else {'HHK_SYMBOL_TABLE': '0',
-                          'HHK_SYMBOL_TABLE_LEN': '0'}, hle_root=args.hle_root)
+                          'HHK_SYMBOL_TABLE_LEN': '0'}, hle_root=args.hle_root,
+                    hle_font=args.hle_font)
     print(f"PC:             0x{cp.cpu.pc:08X}")
     print(f"R15 (SP):       0x{cp.cpu.regs[15]:08X}")
     print(f"R4 (argc):      {cp.cpu.regs[4]}")

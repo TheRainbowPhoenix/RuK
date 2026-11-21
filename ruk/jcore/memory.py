@@ -151,6 +151,7 @@ class MemoryMap:
         }
         # Invalidate caches -- the new region might overlap.
         self._cache_start = -1
+        self._cache_end = -1
         # Rebuild the sorted regions list (smallest first, so the
         # "most specific region wins" rule is preserved).
         rs = []

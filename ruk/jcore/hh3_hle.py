@@ -2,6 +2,7 @@
 import re
 from collections import deque
 from pathlib import Path
+from ruk.jcore.memory import Memory
 
 TABLE = 0x8c070000
 STUB = 0xe5200200
@@ -12,10 +13,11 @@ MASK = 0xffffffff
 
 
 class HH3Services:
-    def __init__(self, machine, root, executable):
+    def __init__(self, machine, root, executable, font_path=None):
         self.cpu, self.mem = machine.cpu, machine.mem
         self.root = Path(root).resolve()
         self.executable = Path(executable)
+        self.font_path = Path(font_path) if font_path else None
         self.symbols = {}
         self.calls = {}
         self.events = deque(maxlen=128)
@@ -29,6 +31,8 @@ class HH3Services:
         self.output = []
 
     def install(self):
+        # SH7305 performance counter window: stored values, no cycle model yet.
+        self.mem.add(0xfc100000, Memory(0x100), name='HH3 performance counters', perms='RW')
         data = self.executable.read_bytes()
         names = set(x.decode('ascii') for x in re.findall(
             rb'Symbol ([A-Za-z_][A-Za-z_0-9]*) not linked', data))
@@ -54,6 +58,12 @@ class HH3Services:
                 addr = DEBUG_FONT
                 for offset in range(0, DEBUG_FONT_SIZE, 4):
                     self.mem.write32(addr + offset, 0)
+                if self.font_path:
+                    font = self.font_path.read_bytes()
+                    if len(font) != 95 * 0xc0:
+                        raise ValueError('font must contain 95 glyphs of 192 bytes')
+                    for offset, value in enumerate(font):
+                        self.mem.write8(addr + offset, value)
             else:
                 addr = STUB + index * 4
                 self.symbols[addr] = name

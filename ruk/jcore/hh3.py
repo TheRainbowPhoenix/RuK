@@ -339,7 +339,7 @@ def run_hh3(classpad, path: str,
             argv: Optional[List[str]] = None,
             envp: Optional[Dict[str, str]] = None,
             stack_top: int = 0x8C080000,
-            setup_symbols: bool = True, hle_root=None) -> int:
+            setup_symbols: bool = True, hle_root=None, hle_font=None) -> int:
     """Load an .hh3 file and set up CPU state to run it.
 
     Mirrors yal's ELFLoader::execute():
@@ -377,7 +377,7 @@ def run_hh3(classpad, path: str,
     # table's address and length as hex strings.
     if hle_root is not None:
         from ruk.jcore.hh3_hle import HH3Services
-        services = HH3Services(classpad, hle_root, path)
+        services = HH3Services(classpad, hle_root, path, hle_font)
         classpad.cpu.hh3_hle = services
         sym_addr, sym_len = services.install()
         envp = dict(envp or {})

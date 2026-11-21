@@ -50,6 +50,37 @@ DSP_STORE_MODE = {
 
 
 # ============================================================================
+# P-operation operand field tables (Sdsha/libCPU73050 DSPOperation* tables)
+# ============================================================================
+
+# Dz (bits 3:0) via DSPOperationDataReg_Table; 0 entries are reserved fields.
+DSP_DZ_TABLE = (None, None, None, None, None, 'a1', None, 'a0',
+                'x0', 'x1', 'y0', 'y1', 'm0', None, 'm1', None)
+
+# Sx operand (bits 7:6) for PADD/PSUB/PCMP/PSHL/PSHA and the PMULS bundles:
+# DSPOpLoadSXRegCall_Table.  Accumulator sources carry their guard bits.
+DSP_SXLOAD_TABLE = ('y0', 'y1', 'a0', 'a1')
+
+# Sy operand (bits 5:4) for PADD/PSUB/PCMP and the PMULS bundles:
+# DSPOpLoadSYRegCall_Table.
+DSP_SYLOAD_TABLE = ('y0', 'y1', 'm0', 'm1')
+
+# Sy operand (bits 5:4) for PSHL/PSHA shift amounts: DSPOperationSYReg_Table.
+# Shift counts come from M0/M1/X0/X1, not the loadable-source set above.
+DSP_SYREG_TABLE = ('m0', 'm1', 'x0', 'x1')
+
+# PMULS Se (bits 11:10) / Sf (bits 9:8) for standalone PMULS and bundles.
+DSP_SE_TABLE = ('x0', 'x1', 'y0', 'a1')
+DSP_SF_TABLE = ('y0', 'y1', 'x0', 'a1')
+
+# PMULS Dg (bits 3:2).
+DSP_DG_TABLE = ('m0', 'm1', 'a0', 'a1')
+
+# PADD/PSUB Dz in bundles and PCLR Du (bits 1:0): DSPOperationDUReg_Table.
+DSP_DU_TABLE = ('y0', 'm0', 'a0', 'a1')
+
+
+# ============================================================================
 # 32-bit / 16-bit / 8-bit helpers
 # ============================================================================
 
@@ -111,6 +142,88 @@ def _sext8_to_32(val) -> int:
     if val & 0x80:
         return (val | 0xFFFFFF00) & 0xFFFFFFFF
     return val & 0xFFFFFFFF
+
+
+# ============================================================================
+# 40-bit accumulator helpers (value32 : guard8)
+# ============================================================================
+
+def _dsp_load40(cpu, name):
+    """Load a DSP register as a 40-bit (value, guard) pair.
+
+    Per libCPU73050 DSPOpLoadSx: accumulators contribute their A0G/A1G
+    guard byte; 32-bit registers contribute the sign extension of their
+    32-bit value as guard.
+    """
+    value = cpu.regs[name] & 0xFFFFFFFF
+    if name in ('a0', 'a1'):
+        guard = cpu.regs[name + 'g'] & 0xFF
+    else:
+        guard = 0xFF if value & 0x80000000 else 0
+    return value, guard
+
+
+def _dsp_store40(cpu, name, value, guard):
+    """Write a 40-bit (value, guard) pair to a DSP register."""
+    cpu.regs[name] = _u32(value)
+    if name in ('a0', 'a1'):
+        cpu.regs[name + 'g'] = _sext8_to_32(guard & 0xFF)
+
+
+def _dsp_sat40(value, guard, saturate):
+    """Clamp a 40-bit result into 32 bits when SR.S (saturate) is set.
+
+    Returns (value, guard, overflow) where overflow reports a 40-bit
+    value that does not fit the signed 32-bit range.  The saturation
+    direction follows bit 39 (guard bit 7); without SR.S the wrapped
+    32-bit value is kept, exactly as the hardware does.
+    """
+    overflow = guard != (0xFF if value & 0x80000000 else 0)
+    if not (overflow and saturate):
+        return value, guard, overflow
+    if guard & 0x80:
+        return 0x80000000, 0xFF, True
+    return 0x7FFFFFFF, 0, True
+
+
+def _dsp_write_flags(cpu, carry, negative, zero, signed_overflow, overflow):
+    """Update DSR and SR.T after an unconditional P-operation.
+
+    Mirrors libCPU73050 LABEL_383: the mask-selected flag lands in
+    DSR.DC, N/Z/OF land in bits 4-6, GT in bit 7; with DSR bit 8 set the
+    same selector also drives SR.T.  Conditional (DCT/DCF) forms skip
+    this entirely.
+    """
+    sr = cpu.regs['sr']
+    dsr = cpu.regs['dsr']
+    effective_overflow = int(overflow and not (sr & 2))
+    ge = int(not (negative ^ signed_overflow))
+    gt = int(ge and not zero)
+    choices = (carry, negative, zero, effective_overflow, gt, ge, 0, 0)
+    dc = choices[(dsr >> 1) & 7]
+    dsr = ((dsr & ~0xF1) | (effective_overflow << 4) |
+           (negative << 5) | (zero << 6) | (gt << 7) | dc)
+    if dsr & 0x100:
+        selector = (dsr >> 9) & 7
+        t_bit = choices[selector]
+        if selector == 3 and overflow and (sr & 2):
+            t_bit = 1
+        cpu.regs['sr'] = (sr & ~1) | t_bit
+        dsr |= ((int(overflow) << 12) | (negative << 13) |
+                (zero << 14) | (gt << 15))
+    cpu.regs['dsr'] = dsr
+
+
+def _dsp_dct_dcf_active(cpu, conditional):
+    """Gate a DCT/DCF conditional P-op on DSR.DC (bit 0).
+
+    conditional 1 = DCT (executes while the repeat loop is live),
+    conditional 2 = DCF (executes once it has finished).
+    """
+    dc = cpu.regs['dsr'] & 1
+    if (conditional == 1 and not dc) or (conditional == 2 and dc):
+        return False
+    return True
 
 
 # ============================================================================
@@ -384,24 +497,334 @@ def _execute_standalone_pop(cpu, word):
             cpu.regs['dsr'] = dsr
         cpu.pc = _u32(cpu.pc + 4)
         return True
-    # CPU_DSPInstructionOperation cases 40-4f, PMULS Se,Sf,Dg.
-    if (word & 0xf000) == 0x4000 and (word & 0x00f3) == 0:
-        se = ('x0', 'x1', 'y0', 'a1')[(word >> 10) & 3]
-        sf = ('y0', 'y1', 'x0', 'a1')[(word >> 8) & 3]
-        dest = ('m0', 'm1', 'a0', 'a1')[(word >> 2) & 3]
-        a = _i16(cpu.regs[se] >> 16)
-        b = _i16(cpu.regs[sf] >> 16)
-        saturated = cpu.regs['sr'] & 2 and a == -32768 and b == -32768
-        value = 0x7FFFFFFF if saturated else _u32(a * b * 2)
-        cpu.regs[dest] = value
-        if dest in ('a0', 'a1'):
-            cpu.regs[dest + 'g'] = 0xffffffff if value & 0x80000000 else 0
-        cpu.pc = _u32(cpu.pc + 4)
-        return True
+
+    # PCMP Sx,Sy (bits 3:0 are a reserved field and must be zero).
+    opcode = word >> 8
+    if opcode == 0x84:
+        return _dsp_pcmp(cpu, word)
+
+    # PADD / PSUB families and their DCT / DCF forms.  Each returns
+    # False for reserved Dz fields so the caller treats the word as an
+    # undecodable P-op, like the real decoder does.
+    if 0xB0 <= opcode <= 0xB3 or 0xA0 <= opcode <= 0xA3 or 0x85 <= opcode <= 0x87:
+        return _dsp_padd_psub(cpu, word)
+
+    # PSHL / PSHA with a register-held shift count (and DCT / DCF).
+    if 0x81 <= opcode <= 0x83:
+        return _dsp_pshl_psha(cpu, word, arithmetic=False)
+    if 0x91 <= opcode <= 0x93:
+        return _dsp_pshl_psha(cpu, word, arithmetic=True)
+
+    # PSHL / PSHA with an immediate shift count.
+    if opcode <= 0x07:
+        return _dsp_shift_imm(cpu, word, arithmetic=False)
+    if 0x10 <= opcode <= 0x17:
+        return _dsp_shift_imm(cpu, word, arithmetic=True)
+
+    # CPU_DSPInstructionOperation cases 40-4f, PMULS Se,Sf,Dg -- standalone,
+    # plus the PCLR Du PMULS / PSUB ... PMULS / PADD ... PMULS bundles that
+    # share the multiply with a second parallel operation.
+    if (word & 0xf000) in (0x4000, 0x6000, 0x7000):
+        top = word >> 12
+        if top == 0x4 and (word & 0x00f3) == 0:
+            se = DSP_SE_TABLE[(word >> 10) & 3]
+            sf = DSP_SF_TABLE[(word >> 8) & 3]
+            product, product_guard = _dsp_pmuls_product(cpu, se, sf)
+            dg = DSP_DG_TABLE[(word >> 2) & 3]
+            _dsp_store40(cpu, dg, product, product_guard)
+            cpu.pc = _u32(cpu.pc + 4)
+            return True
+        if top == 0x4 and (word & 0x00f0) == 0x0010:
+            # PCLR Du PMULS Se,Sf,Dg (Sdsha handler 0x100309d0): Du is
+            # cleared while the multiply commits in parallel.
+            se = DSP_SE_TABLE[(word >> 10) & 3]
+            sf = DSP_SF_TABLE[(word >> 8) & 3]
+            product, product_guard = _dsp_pmuls_product(cpu, se, sf)
+            du = DSP_DU_TABLE[word & 3]
+            dg = DSP_DG_TABLE[(word >> 2) & 3]
+            _dsp_store40(cpu, du, 0, 0)
+            _dsp_store40(cpu, dg, product, product_guard)
+            cpu.pc = _u32(cpu.pc + 4)
+            return True
+        if top in (0x6, 0x7):
+            # PSUB/PADD Sx,Sy,Du PMULS Se,Sf,Dg (Sdsha 0x10033670/0x100302b0).
+            se = DSP_SE_TABLE[(word >> 10) & 3]
+            sf = DSP_SF_TABLE[(word >> 8) & 3]
+            product, product_guard = _dsp_pmuls_product(cpu, se, sf)
+            result, result_guard, carry, signed_overflow = _dsp_add_sub40(
+                cpu, word, subtract=(top == 0x6), with_carry=False, borrow=0)
+            value, guard, overflow = _dsp_sat40(
+                result, result_guard, bool(cpu.regs['sr'] & 2))
+            du = DSP_DU_TABLE[word & 3]
+            dg = DSP_DG_TABLE[(word >> 2) & 3]
+            negative = int(bool(guard & 0x80))
+            zero = int(guard == 0 and value == 0)
+            _dsp_store40(cpu, du, value, guard)
+            _dsp_store40(cpu, dg, product, product_guard)
+            _dsp_write_flags(cpu, carry, negative, zero, signed_overflow,
+                             overflow)
+            cpu.pc = _u32(cpu.pc + 4)
+            return True
     return False
 
 
-# Sdsha DSP X/Y slot decode, IDs 323-360; indexed by low six bits.
+# ============================================================================
+# P-operation family helpers (semantics per Sdsha.dll, cross-checked
+# against libCPU73050 CPU_DSPInstructionOperation)
+# ============================================================================
+
+def _dsp_pmuls_product(cpu, se, sf):
+    """PMULS: 2 * sext16(HIWORD(Se)) * sext16(HIWORD(Sf)) as a 40-bit pair.
+
+    The true product fits 33 bits, so the guard byte is the sign of the
+    33-bit value (Sdsha keeps bit 32 even when the low half wraps, e.g.
+    (-0x8000) * (-0x8000) = +0x80000000 with a positive guard).  With
+    SR.S the +2^31 case saturates to 0x7FFFFFFF.
+    """
+    a = _i16(cpu.regs[se] >> 16)
+    b = _i16(cpu.regs[sf] >> 16)
+    product = 2 * a * b
+    if product == 0x80000000 and cpu.regs['sr'] & 2:
+        product = 0x7FFFFFFF
+    value = _u32(product)
+    guard = 0xFF if product < 0 else 0
+    return value, guard
+
+
+def _dsp_add_sub40(cpu, word, subtract, reversed_sources=False,
+                   with_carry=False):
+    """PADD/PSUB/PADDC/PSUBC 40-bit arithmetic.
+
+    Sources: Sx (bits 7:6) and Sy (bits 5:4) via the loadable-source
+    tables; accumulators contribute their guard bytes.  The carry input
+    for PADDC/PSUBC is DSR.DC (bit 0).  Returns (value, guard, carry,
+    signed_overflow): carry is the unsigned carry/borrow out of bit 31
+    and signed_overflow the 32-bit signed overflow, both feeding DSR.
+    """
+    if subtract and reversed_sources:
+        # PSUB Sy,Sx,Dz: Sy first, Sx second (fields swap tables).
+        a_name = DSP_SYLOAD_TABLE[(word >> 4) & 3]
+        b_name = DSP_SXLOAD_TABLE[(word >> 6) & 3]
+    else:
+        a_name = DSP_SXLOAD_TABLE[(word >> 6) & 3]
+        b_name = DSP_SYLOAD_TABLE[(word >> 4) & 3]
+    a_value, a_guard = _dsp_load40(cpu, a_name)
+    b_value, b_guard = _dsp_load40(cpu, b_name)
+    dc = (cpu.regs['dsr'] & 1) if with_carry else 0
+
+    if subtract:
+        a40 = (a_guard << 32) | a_value
+        b40 = (b_guard << 32) | b_value
+        if a40 & (1 << 39):
+            a40 -= 1 << 40
+        if b40 & (1 << 39):
+            b40 -= 1 << 40
+        result = (a40 - b40 - dc) & ((1 << 40) - 1)
+        value = result & 0xFFFFFFFF
+        guard = (result >> 32) & 0xFF
+        carry = int(a_value < b_value)
+        signed_overflow = int(
+            bool(a_value ^ b_value) and bool((a_value ^ value) & 0x80000000))
+    else:
+        low = a_value + b_value
+        carry_low = low >> 32
+        value = _u32(low)
+        guard = (a_guard + b_guard + carry_low) & 0xFF
+        carry = int(carry_low)
+        signed_overflow = int(
+            bool(~(a_value ^ b_value) & (a_value ^ value) & 0x80000000))
+    return value, guard, carry, signed_overflow
+
+
+def _dsp_padd_psub(cpu, word):
+    """PADD/PSUB/PADDC/PSUBC Sx,Sy,Dz (opcode + 0/1/2 for base/DCT/DCF).
+
+    opcode bases: 0xB1 PADD, 0xB0 PADDC, 0xA1 PSUB, 0xA0 PSUBC and
+    0x85 PSUB Sy,Sx (source tables swapped).  Conditional forms
+    saturate (SR.S) but leave DSR and SR.T untouched, like every
+    DCT/DCF variant.
+    """
+    opcode = word >> 8
+    family = opcode >> 4
+    if family == 0xB:  # 0xB0..0xB3
+        base, subtract, reversed_sources, with_carry = 0xB0, False, False, opcode == 0xB0
+    elif family == 0xA:  # 0xA0..0xA3
+        base, subtract, reversed_sources, with_carry = 0xA0, True, False, opcode == 0xA0
+    else:  # 0x85..0x87: PSUB Sy,Sx,Dz
+        base, subtract, reversed_sources, with_carry = 0x85, True, True, False
+    conditional = opcode - base
+    if conditional and not _dsp_dct_dcf_active(cpu, conditional):
+        cpu.pc = _u32(cpu.pc + 4)
+        return True
+    dest = DSP_DZ_TABLE[word & 15]
+    if dest is None:
+        return False
+    value, guard, carry, signed_overflow = _dsp_add_sub40(
+        cpu, word, subtract=subtract, reversed_sources=reversed_sources,
+        with_carry=with_carry)
+    value, guard, overflow = _dsp_sat40(value, guard, bool(cpu.regs['sr'] & 2))
+    negative = int(bool(guard & 0x80))
+    zero = int(guard == 0 and value == 0)
+    _dsp_store40(cpu, dest, value, guard)
+    if conditional == 0:
+        _dsp_write_flags(cpu, carry, negative, zero, signed_overflow,
+                         overflow)
+    cpu.pc = _u32(cpu.pc + 4)
+    return True
+
+
+def _dsp_pcmp(cpu, word):
+    """PCMP Sx,Sy (Sdsha handler 0x10030a40): SR.T = Sx > Sy (40-bit
+    signed compare); no DSR update, no writeback.  Bits 3:0 are a
+    reserved field and must be zero."""
+    if word & 0xF:
+        return False
+    a_name = DSP_SXLOAD_TABLE[(word >> 6) & 3]
+    b_name = DSP_SYLOAD_TABLE[(word >> 4) & 3]
+    a_value, a_guard = _dsp_load40(cpu, a_name)
+    b_value, b_guard = _dsp_load40(cpu, b_name)
+    a40 = (a_guard << 32) | a_value
+    b40 = (b_guard << 32) | b_value
+    if a40 & (1 << 39):
+        a40 -= 1 << 40
+    if b40 & (1 << 39):
+        b40 -= 1 << 40
+    if a40 > b40:
+        cpu.regs['sr'] |= 1
+    else:
+        cpu.regs['sr'] &= ~1 & 0xFFFFFFFF
+    cpu.pc = _u32(cpu.pc + 4)
+    return True
+
+
+def _dsp_shift16(cpu, value16, amount):
+    """PSHL barrel shifter on a 16-bit value (libCPU73050 LABEL_7).
+
+    amount is the signed 6-bit shift count: positive shifts left with
+    the last bit shifted out as carry; negative (bit 5 set) shifts
+    logically right; |amount| == 16 leaves the boundary bit as carry
+    and larger shifts return zero.
+    """
+    carry = 0
+    if amount & 0x20:
+        n = 32 - (amount & 0x1F)
+        if n == 16:
+            carry = value16 >> 15
+            value16 = 0
+        elif n > 16:
+            value16 = 0
+        else:
+            carry = (value16 >> (n - 1)) & 1
+            value16 = (value16 >> n) & 0xFFFF
+    elif amount == 16:
+        carry = value16 & 1
+        value16 = 0
+    elif amount > 16:
+        value16 = 0
+    elif amount:
+        carry = (value16 << amount >> 16) & 1
+        value16 = (value16 << amount) & 0xFFFF
+    return value16, carry
+
+
+def _dsp_psha_pair(pair, amount):
+    """PSHA 40-bit pair shift (libCPU73050 case 0x91, LABEL_44).
+
+    pair is (guard << 32) | value; amount the signed 7-bit count.
+    Left shifts carry the last bit crossing bit 32 out as carry; right
+    shifts are arithmetic with carry from the last bit shifted out.
+    """
+    carry = 0
+    if amount & 0x40:
+        n = 64 - (amount & 0x3F)
+        signed = pair - (1 << 40) if pair & (1 << 39) else pair
+        shifted = signed >> n
+        carry = (pair >> (n - 1)) & 1 if n <= 40 else 0
+        return shifted & 0xFFFFFFFF, (shifted >> 32) & 0xFF, carry
+    if amount == 0:
+        return pair & 0xFFFFFFFF, (pair >> 32) & 0xFF, 0
+    if amount <= 32:
+        wide = pair << amount
+        return wide & 0xFFFFFFFF, (wide >> 32) & 0xFF, (wide >> 32) & 1
+    # amount 33..63: the guard byte keeps the residue of the value part.
+    return 0, (pair << (amount - 32)) & 0xFF, 0
+
+
+def _dsp_load_pair(cpu, name):
+    """(value, guard) -> 40-bit pair for a DSP register source."""
+    value, guard = _dsp_load40(cpu, name)
+    return (guard << 32) | value
+
+
+def _dsp_pshl_psha(cpu, word, arithmetic):
+    """PSHL/PSHA Sx,Sy,Dz (opcode 0x81/0x91 + 1/2 for DCT/DCF).
+
+    PSHL shifts the upper halfword of Sx and clears the guard byte;
+    PSHA arithmetically shifts the full 40-bit Sx.  The shift count is
+    the signed 6-bit (PSHL) / 7-bit (PSHA) upper halfword of Sy, read
+    from the M0/M1/X0/X1 set.  Conditional forms neither touch DSR
+    nor saturate.
+    """
+    opcode = word >> 8
+    base = 0x91 if arithmetic else 0x81
+    conditional = opcode - base
+    if conditional and not _dsp_dct_dcf_active(cpu, conditional):
+        cpu.pc = _u32(cpu.pc + 4)
+        return True
+    dest = DSP_DZ_TABLE[word & 15]
+    if dest is None:
+        return False
+    src = DSP_SXLOAD_TABLE[(word >> 6) & 3]
+    count_reg = DSP_SYREG_TABLE[(word >> 4) & 3]
+    raw_amount = (cpu.regs[count_reg] >> 16) & (0x7F if arithmetic else 0x3F)
+    if arithmetic:
+        value, guard, carry = _dsp_psha_pair(_dsp_load_pair(cpu, src),
+                                             raw_amount)
+    else:
+        value16, carry = _dsp_shift16(
+            (cpu.regs[src] >> 16) & 0xFFFF, raw_amount)
+        value = value16 << 16
+        guard = 0
+    if conditional == 0:
+        value, guard, overflow = _dsp_sat40(
+            value, guard, bool(cpu.regs['sr'] & 2))
+    _dsp_store40(cpu, dest, value, guard)
+    if conditional == 0:
+        negative = int(bool(value & 0x80000000))
+        zero = int(value == 0 and guard == 0)
+        _dsp_write_flags(cpu, carry, negative, zero, 0, overflow)
+    cpu.pc = _u32(cpu.pc + 4)
+    return True
+
+
+def _dsp_shift_imm(cpu, word, arithmetic):
+    """PSHL/PSHA #imm,Dz (opcode bases 0x00 / 0x10): shift Dz in place.
+
+    The immediate lives in bits 9:4 (6 bits for PSHL, 7 for PSHA) and
+    is signed; negative counts shift right.
+    """
+    raw_amount = (word >> 4) & (0x7F if arithmetic else 0x3F)
+    dest = DSP_DZ_TABLE[word & 15]
+    if dest is None:
+        return False
+    if arithmetic:
+        value, guard, carry = _dsp_psha_pair(_dsp_load_pair(cpu, dest),
+                                             raw_amount)
+        value, guard, overflow = _dsp_sat40(
+            value, guard, bool(cpu.regs['sr'] & 2))
+    else:
+        value16, carry = _dsp_shift16(
+            (cpu.regs[dest] >> 16) & 0xFFFF, raw_amount)
+        value = value16 << 16
+        guard = 0
+        value, guard, overflow = _dsp_sat40(
+            value, guard, bool(cpu.regs['sr'] & 2))
+    _dsp_store40(cpu, dest, value, guard)
+    negative = int(bool(value & 0x80000000))
+    zero = int(value == 0 and guard == 0)
+    _dsp_write_flags(cpu, carry, negative, zero, 0, overflow)
+    cpu.pc = _u32(cpu.pc + 4)
+    return True
 # IDs are stable references to the extracted instruction-format table.
 _XY_SLOTS = (
     (359, 360), (359, 344), (359, 345), (359, 346),
