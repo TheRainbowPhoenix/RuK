@@ -1337,11 +1337,9 @@ class Emulator:
         self.cpu.pc = _u32(self.cpu.pc + 2)
 
     def SHAD(self, m: int, n: int):
-        """SHAD Rm, Rn: dynamic arithmetic shift.  Shift amount = signed low 5 bits of Rm."""
-        shift = _i32(self.cpu.regs[m]) & 0x1F
-        # sign-extend from 5 bits
-        if shift & 0x10:
-            shift -= 0x20
+        """SHAD Rm, Rn: sign selects direction, low five bits select count."""
+        count = self.cpu.regs[m]
+        shift = (count & 31) if not count & 0x80000000 else -(((~count) & 31) + 1)
         val = _i32(self.cpu.regs[n])
         if shift >= 0:
             result = val << shift
@@ -1351,10 +1349,9 @@ class Emulator:
         self.cpu.pc = _u32(self.cpu.pc + 2)
 
     def SHLD(self, m: int, n: int):
-        """SHLD Rm, Rn: dynamic logical shift.  Shift amount = signed low 5 bits of Rm."""
-        shift = _i32(self.cpu.regs[m]) & 0x1F
-        if shift & 0x10:
-            shift -= 0x20
+        """SHLD Rm, Rn: sign selects direction, low five bits select count."""
+        count = self.cpu.regs[m]
+        shift = (count & 31) if not count & 0x80000000 else -(((~count) & 31) + 1)
         val = self.cpu.regs[n]
         if shift >= 0:
             result = val << shift
