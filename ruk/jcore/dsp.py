@@ -1,8 +1,8 @@
 """SH DSP support under reconstruction.
 
 MOVS and X/Y moves use the extracted CPU73050 and Sdsha decoder tables.
-Standalone PMULS and logical P-operations are implemented; the older
-P-operation helpers below are experimental and are not dispatched.
+Standalone PMULS, logical operations, copy, increment, decrement, swap,
+clear, and MAC transfers are implemented. Older helpers below remain experimental.
 """
 
 from typing import Optional
@@ -171,15 +171,24 @@ def _execute_standalone_pop(cpu, word):
     # PCOPY Sx/Sy,Dz and its conditional variants. Guard bits participate
     # in the 40-bit value when the source is an accumulator.
     opcode = word >> 8
-    if opcode in (0xD9, 0xDA, 0xDB, 0xF9, 0xFA, 0xFB):
-        x_source = opcode < 0xF0
-        if word & (0x30 if x_source else 0xC0):
+    unary_bases = {
+        0x89: ('dec', True), 0xA9: ('dec', False),
+        0x99: ('inc', True), 0xB9: ('inc', False),
+        0x9D: ('swap', True), 0xBD: ('swap', False),
+        0xD9: ('copy', True), 0xF9: ('copy', False),
+    }
+    unary_base = next((base for base in unary_bases if base <= opcode <= base + 2), None)
+    if unary_base is not None:
+        operation, x_source = unary_bases[unary_base]
+        selector_mask = 0x30 if x_source else 0xC0
+        selector_value = (0x10 if x_source else 0x40) if operation == 'swap' else 0
+        if word & selector_mask != selector_value:
             return False
         dest = (None, None, None, None, None, 'a1', None, 'a0',
                 'x0', 'x1', 'y0', 'y1', 'm0', None, 'm1', None)[word & 15]
         if dest is None:
             return False
-        conditional = opcode - (0xD9 if x_source else 0xF9)
+        conditional = opcode - unary_base
         dsr = cpu.regs['dsr']
         if (conditional == 1 and not (dsr & 1)) or (conditional == 2 and dsr & 1):
             cpu.pc = _u32(cpu.pc + 4)
@@ -189,10 +198,28 @@ def _execute_standalone_pop(cpu, word):
         value = cpu.regs[source]
         guard = ((cpu.regs[source + 'g'] & 0xFF) if source in ('a0', 'a1')
                  else (0xFF if value & 0x80000000 else 0))
+        carry = 0
+        original_guard = guard
+        if operation == 'swap':
+            value = _u32((value << 16) | (value >> 16))
+            guard = 0xFF if value & 0x80000000 else 0
+        elif operation in ('inc', 'dec'):
+            previous = value
+            value = _u32(value + (0x10000 if operation == 'inc' else -0x10000))
+            old_sign = bool(previous & 0x80000000)
+            new_sign = bool(value & 0x80000000)
+            carry = int(old_sign and not new_sign if operation == 'inc'
+                        else not old_sign and new_sign)
+            if carry:
+                guard = (guard + (1 if operation == 'inc' else -1)) & 0xFF
+            value &= 0xFFFF0000
         overflow = guard != (0xFF if value & 0x80000000 else 0)
+        if operation == 'swap':
+            overflow = False
         if overflow and (cpu.regs['sr'] & 2):
-            value = 0x80000000 if guard & 0x80 else 0x7FFFFFFF
-            guard = 0xFF if guard & 0x80 else 0
+            sign_guard = original_guard if operation in ('inc', 'dec') else guard
+            value = 0x80000000 if sign_guard & 0x80 else 0x7FFFFFFF
+            guard = 0xFF if sign_guard & 0x80 else 0
         cpu.regs[dest] = value
         if dest in ('a0', 'a1'):
             cpu.regs[dest + 'g'] = _sext8_to_32(guard)
@@ -202,7 +229,7 @@ def _execute_standalone_pop(cpu, word):
             gt = int(not negative and not zero)
             ge = int(not negative)
             effective_overflow = int(overflow and not (cpu.regs['sr'] & 2))
-            choices = (0, negative, zero, effective_overflow, gt, ge, 0, 0)
+            choices = (carry, negative, zero, effective_overflow, gt, ge, 0, 0)
             dc = choices[(dsr >> 1) & 7]
             dsr = ((dsr & ~0xF1) | (effective_overflow << 4) |
                    (negative << 5) | (zero << 6) | (gt << 7) | dc)
