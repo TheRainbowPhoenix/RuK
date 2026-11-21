@@ -6,6 +6,8 @@ from pathlib import Path
 TABLE = 0x8c070000
 STUB = 0xe5200200
 VRAM = 0xfe280000
+DEBUG_FONT = 0x8c090000
+DEBUG_FONT_SIZE = 0xc000  # 256 glyphs, 8 by 12 RGB565 pixels
 MASK = 0xffffffff
 
 
@@ -28,10 +30,15 @@ class HH3Services:
 
     def install(self):
         data = self.executable.read_bytes()
-        names = sorted(set(x.decode('ascii') for x in re.findall(
-            rb'Symbol ([A-Za-z_][A-Za-z_0-9]*) not linked', data)))
+        names = set(x.decode('ascii') for x in re.findall(
+            rb'Symbol ([A-Za-z_][A-Za-z_0-9]*) not linked', data))
         if not names:
             raise ValueError('HH3 has no recognizable Hollyhock symbol names')
+        # Data symbols have no "not linked" function, so they do not appear
+        # in the panic-message scan.  The guest uses this as a pixel array.
+        if b'DEBUG_FONTBASE\0' in data:
+            names.add('DEBUG_FONTBASE')
+        names = sorted(names)
         guard = bytearray()
         for i in range(16):
             b = self.mem.read8(0x814fffe0 + i)
@@ -42,9 +49,15 @@ class HH3Services:
             guard.append(0)
         table = bytearray(guard)
         for index, name in enumerate(names):
-            addr = STUB + index * 4
-            self.symbols[addr] = name
-            self.mem.write16(addr, 0xc3fd)  # TRAPA #FD, intercepted at this address only
+            if name == 'DEBUG_FONTBASE':
+                # Blank fallback glyphs until an OS-matched font is available.
+                addr = DEBUG_FONT
+                for offset in range(0, DEBUG_FONT_SIZE, 4):
+                    self.mem.write32(addr + offset, 0)
+            else:
+                addr = STUB + index * 4
+                self.symbols[addr] = name
+                self.mem.write16(addr, 0xc3fd)  # TRAPA #FD, intercepted at this address only
             table.extend(name.encode('ascii') + b'\0' + addr.to_bytes(4, 'big'))
         if len(table) > 0x8000:
             raise ValueError('HH3 symbol table exceeds reserved memory')
