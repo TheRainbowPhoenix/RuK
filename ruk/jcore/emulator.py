@@ -1611,6 +1611,9 @@ class Emulator:
 
     def TRAPA(self, i: int):
         """TRAPA #imm: trap exception.  PC -> SPC, SR -> SSR, EXPEVT=0x160, PC = VBR+0x100."""
+        hle = getattr(self.cpu, 'hh3_hle', None)
+        if hle is not None and hle.dispatch(self.cpu.pc):
+            return
         imm = i & 0xFF
         self.cpu._ldst = False
         self.cpu.spc = _u32(self.cpu.pc + 2)

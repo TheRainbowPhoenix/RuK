@@ -2,12 +2,12 @@
 """Standalone hh3 runner.
 
 Usage:
-    python3 run_hh3.py <file.hh3> [max_steps] [--btu]
+    python3 run_hh3.py <file.hh3> [max_steps] [--btu] [--hle-root DIR] [--single-step]
 
 Loads and runs an .hh3 file on the RuK emulator with all peripherals
 attached.  Useful for quick testing without the GUI.
 """
-import sys, os, time
+import sys, os, time, argparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from ruk.classpad import Classpad
@@ -19,12 +19,14 @@ def main():
         print(__doc__)
         sys.exit(1)
 
-    args = [arg for arg in sys.argv[1:] if arg != '--btu']
-    if not args:
-        print(__doc__)
-        sys.exit(1)
-    hh3_path = args[0]
-    max_steps = int(args[1]) if len(args) > 1 else 10_000_000
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('hh3_path')
+    parser.add_argument('max_steps', nargs='?', type=int, default=10_000_000)
+    parser.add_argument('--btu', action='store_true')
+    parser.add_argument('--hle-root', help='read-only directory mounted as fls0')
+    parser.add_argument('--single-step', action='store_true', help='use the instruction interpreter')
+    args = parser.parse_args()
+    hh3_path, max_steps = args.hh3_path, args.max_steps
 
     # 1. Print hh3 metadata
     with open(hh3_path, 'rb') as f:
@@ -63,15 +65,17 @@ def main():
         rom, debug=False,
         with_tmu=True, with_rtc=True, with_dma=True,
         with_display=True, with_bsc=True, with_cpg=True,
-        with_btu='--btu' in sys.argv,
+        with_btu=args.btu,
     )
+    if args.single_step:
+        cp.cpu.debug = True  # propagate memory/decoder failures to the runner
 
     # 4. Load and run the hh3
     print(f"\nLoading {os.path.basename(hh3_path)}...")
     entry = run_hh3(cp, hh3_path,
                     argv=[os.path.basename(hh3_path)],
-                    envp={'HHK_SYMBOL_TABLE': '0',
-                          'HHK_SYMBOL_TABLE_LEN': '0'})
+                    envp=None if args.hle_root else {'HHK_SYMBOL_TABLE': '0',
+                          'HHK_SYMBOL_TABLE_LEN': '0'}, hle_root=args.hle_root)
     print(f"PC:             0x{cp.cpu.pc:08X}")
     print(f"R15 (SP):       0x{cp.cpu.regs[15]:08X}")
     print(f"R4 (argc):      {cp.cpu.regs[4]}")
@@ -82,7 +86,13 @@ def main():
     print(f"\nRunning ({max_steps:,} steps max)...")
     t0 = time.perf_counter()
     try:
-        steps = cp.cpu.run(max_steps=max_steps)
+        if args.single_step:
+            steps = 0
+            while steps < max_steps and not cp.cpu.ebreak and cp.cpu.pc != 0xffffffff:
+                cp.cpu.step()
+                steps += 1
+        else:
+            steps = cp.cpu.run(max_steps=max_steps)
     except Exception as e:
         print(f"Exception: {e!r}")
         import traceback; traceback.print_exc()
@@ -95,6 +105,8 @@ def main():
     print(f"  Throughput:   {steps/(t1-t0):,.0f} steps/s")
     print(f"  Final PC:     0x{cp.cpu.pc:08X}")
     print(f"  ebreak:       {cp.cpu.ebreak}")
+    if args.hle_root:
+        print(f"  HH3 services: {cp.cpu.hh3_hle.calls}")
     if hasattr(cp.cpu, 'jit_stats'):
         print(f"  JIT stats:    {cp.cpu.jit_stats()}")
 

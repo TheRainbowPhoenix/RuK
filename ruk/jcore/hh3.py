@@ -339,7 +339,7 @@ def run_hh3(classpad, path: str,
             argv: Optional[List[str]] = None,
             envp: Optional[Dict[str, str]] = None,
             stack_top: int = 0x8C080000,
-            setup_symbols: bool = True) -> int:
+            setup_symbols: bool = True, hle_root=None) -> int:
     """Load an .hh3 file and set up CPU state to run it.
 
     Mirrors yal's ELFLoader::execute():
@@ -375,7 +375,14 @@ def run_hh3(classpad, path: str,
     # Set up the HHK symbol table so gint-compiled addins don't panic.
     # This must happen BEFORE we build envp, because envp carries the
     # table's address and length as hex strings.
-    if setup_symbols and envp is None:
+    if hle_root is not None:
+        from ruk.jcore.hh3_hle import HH3Services
+        services = HH3Services(classpad, hle_root, path)
+        classpad.cpu.hh3_hle = services
+        sym_addr, sym_len = services.install()
+        envp = dict(envp or {})
+        envp.update(HHK_SYMBOL_TABLE=f'{sym_addr:X}', HHK_SYMBOL_TABLE_LEN=f'{sym_len:X}')
+    elif setup_symbols and envp is None:
         sym_addr, sym_len = _setup_symbol_table(classpad)
         envp = {
             'HHK_SYMBOL_TABLE': f'{sym_addr:X}',
