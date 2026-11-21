@@ -168,6 +168,56 @@ def handle_dsp_instruction(cpu, op_val: int) -> bool:
 
 def _execute_standalone_pop(cpu, word):
     """Execute validated F800 P-operations; return False for unsupported words."""
+    # PCOPY Sx/Sy,Dz and its conditional variants. Guard bits participate
+    # in the 40-bit value when the source is an accumulator.
+    opcode = word >> 8
+    if opcode in (0xD9, 0xDA, 0xDB, 0xF9, 0xFA, 0xFB):
+        x_source = opcode < 0xF0
+        if word & (0x30 if x_source else 0xC0):
+            return False
+        dest = (None, None, None, None, None, 'a1', None, 'a0',
+                'x0', 'x1', 'y0', 'y1', 'm0', None, 'm1', None)[word & 15]
+        if dest is None:
+            return False
+        conditional = opcode - (0xD9 if x_source else 0xF9)
+        dsr = cpu.regs['dsr']
+        if (conditional == 1 and not (dsr & 1)) or (conditional == 2 and dsr & 1):
+            cpu.pc = _u32(cpu.pc + 4)
+            return True
+        source = (('x0', 'x1', 'a0', 'a1')[(word >> 6) & 3] if x_source
+                  else ('y0', 'y1', 'm0', 'm1')[(word >> 4) & 3])
+        value = cpu.regs[source]
+        guard = ((cpu.regs[source + 'g'] & 0xFF) if source in ('a0', 'a1')
+                 else (0xFF if value & 0x80000000 else 0))
+        overflow = guard != (0xFF if value & 0x80000000 else 0)
+        if overflow and (cpu.regs['sr'] & 2):
+            value = 0x80000000 if guard & 0x80 else 0x7FFFFFFF
+            guard = 0xFF if guard & 0x80 else 0
+        cpu.regs[dest] = value
+        if dest in ('a0', 'a1'):
+            cpu.regs[dest + 'g'] = _sext8_to_32(guard)
+        if conditional == 0:
+            negative = int(bool(guard & 0x80))
+            zero = int(guard == 0 and value == 0)
+            gt = int(not negative and not zero)
+            ge = int(not negative)
+            effective_overflow = int(overflow and not (cpu.regs['sr'] & 2))
+            choices = (0, negative, zero, effective_overflow, gt, ge, 0, 0)
+            dc = choices[(dsr >> 1) & 7]
+            dsr = ((dsr & ~0xF1) | (effective_overflow << 4) |
+                   (negative << 5) | (zero << 6) | (gt << 7) | dc)
+            if dsr & 0x100:
+                selector = (dsr >> 9) & 7
+                t_bit = choices[selector]
+                if selector == 3 and overflow and (cpu.regs['sr'] & 2):
+                    t_bit = 1
+                cpu.regs['sr'] = (cpu.regs['sr'] & ~1) | t_bit
+                dsr |= ((int(overflow) << 12) | (negative << 13) |
+                        (zero << 14) | (gt << 15))
+            cpu.regs['dsr'] = dsr
+        cpu.pc = _u32(cpu.pc + 4)
+        return True
+
     # PCLR Dz and its conditional forms (Sdsha handler 0x100308f0).
     opcode = word >> 8
     if opcode in (0x8D, 0x8E, 0x8F):
