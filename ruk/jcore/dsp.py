@@ -176,19 +176,38 @@ def _execute_standalone_pop(cpu, word):
         0x99: ('inc', True), 0xB9: ('inc', False),
         0x9D: ('swap', True), 0xBD: ('swap', False),
         0xD9: ('copy', True), 0xF9: ('copy', False),
+        0xC9: ('neg', True), 0xE9: ('neg', False),
     }
     unary_base = next((base for base in unary_bases if base <= opcode <= base + 2), None)
-    if unary_base is not None:
-        operation, x_source = unary_bases[unary_base]
+    # PABS and PRND conditional opcodes share their high byte with PDEC/PINC;
+    # bit 4 (Sx) or bit 6 (Sy) distinguishes the forms.
+    special = {
+        0x88: ('abs', True, 0), 0xA8: ('abs', False, 0),
+        0x98: ('round', True, 0), 0xB8: ('round', False, 0),
+    }
+    for base, operation, x_side in ((0x8A, 'abs', True), (0xAA, 'abs', False),
+                                    (0x9A, 'round', True), (0xBA, 'round', False)):
+        marker = 0x10 if x_side else 0x40
+        mask = 0x30 if x_side else 0xC0
+        if opcode in (base, base + 1) and word & mask == marker:
+            special[opcode] = (operation, x_side, opcode - base + 1)
+    if opcode in special or unary_base is not None:
+        if opcode in special:
+            operation, x_source, conditional = special[opcode]
+        else:
+            operation, x_source = unary_bases[unary_base]
+            conditional = opcode - unary_base
         selector_mask = 0x30 if x_source else 0xC0
-        selector_value = (0x10 if x_source else 0x40) if operation == 'swap' else 0
+        if operation == 'swap' and word & selector_mask == 0:
+            operation = 'dmsb'
+        marker_form = operation == 'swap' or (operation in ('abs', 'round') and conditional)
+        selector_value = (0x10 if x_source else 0x40) if marker_form else 0
         if word & selector_mask != selector_value:
             return False
         dest = (None, None, None, None, None, 'a1', None, 'a0',
                 'x0', 'x1', 'y0', 'y1', 'm0', None, 'm1', None)[word & 15]
         if dest is None:
             return False
-        conditional = opcode - unary_base
         dsr = cpu.regs['dsr']
         if (conditional == 1 and not (dsr & 1)) or (conditional == 2 and dsr & 1):
             cpu.pc = _u32(cpu.pc + 4)
@@ -200,24 +219,44 @@ def _execute_standalone_pop(cpu, word):
                  else (0xFF if value & 0x80000000 else 0))
         carry = 0
         original_guard = guard
-        if operation == 'swap':
+        if operation == 'dmsb':
+            bits = (guard << 32) | value
+            different = bits ^ (0xFFFFFFFFFF if guard & 0x80 else 0)
+            value = _u32((30 - (different.bit_length() - 1)) << 16)
+            guard = 0xFF if value & 0x80000000 else 0
+        elif operation == 'swap':
             value = _u32((value << 16) | (value >> 16))
             guard = 0xFF if value & 0x80000000 else 0
-        elif operation in ('inc', 'dec'):
+        elif operation in ('inc', 'dec', 'round'):
             previous = value
-            value = _u32(value + (0x10000 if operation == 'inc' else -0x10000))
+            delta = {'inc': 0x10000, 'dec': -0x10000, 'round': 0x8000}[operation]
+            value = _u32(value + delta)
             old_sign = bool(previous & 0x80000000)
             new_sign = bool(value & 0x80000000)
-            carry = int(old_sign and not new_sign if operation == 'inc'
+            carry = int(old_sign and not new_sign if operation != 'dec'
                         else not old_sign and new_sign)
             if carry:
-                guard = (guard + (1 if operation == 'inc' else -1)) & 0xFF
+                guard = (guard + (-1 if operation == 'dec' else 1)) & 0xFF
             value &= 0xFFFF0000
+        elif operation == 'neg' or (operation == 'abs' and guard & 0x80):
+            previous = value
+            value = _u32(-value)
+            if operation == 'abs':
+                carry = int(previous != 0)
+            else:
+                carry = int(bool(previous & 0x80000000) or bool(value & 0x80000000))
+            guard = (-guard - carry) & 0xFF
         overflow = guard != (0xFF if value & 0x80000000 else 0)
+        if operation in ('abs', 'neg') and original_guard & 0x80 and guard & 0x80:
+            overflow = True
         if operation == 'swap':
             overflow = False
         if overflow and (cpu.regs['sr'] & 2):
-            sign_guard = original_guard if operation in ('inc', 'dec') else guard
+            sign_guard = original_guard if operation in ('inc', 'dec', 'round') else guard
+            if operation == 'abs':
+                sign_guard = 0
+            elif operation == 'neg':
+                sign_guard = 0 if original_guard & 0x80 else 0x80
             value = 0x80000000 if sign_guard & 0x80 else 0x7FFFFFFF
             guard = 0xFF if sign_guard & 0x80 else 0
         cpu.regs[dest] = value
@@ -226,8 +265,17 @@ def _execute_standalone_pop(cpu, word):
         if conditional == 0:
             negative = int(bool(guard & 0x80))
             zero = int(guard == 0 and value == 0)
-            gt = int(not negative and not zero)
-            ge = int(not negative)
+            signed_overflow = 0
+            if operation == 'abs':
+                signed_overflow = negative
+            elif operation == 'neg':
+                signed_overflow = int(bool(original_guard & 0x80) and negative)
+            elif operation in ('inc', 'round'):
+                signed_overflow = int(not (original_guard & 0x80) and negative)
+            elif operation == 'dec':
+                signed_overflow = int(bool(original_guard & 0x80) and not negative)
+            ge = int(not (negative ^ signed_overflow))
+            gt = int(ge and not zero)
             effective_overflow = int(overflow and not (cpu.regs['sr'] & 2))
             choices = (carry, negative, zero, effective_overflow, gt, ge, 0, 0)
             dc = choices[(dsr >> 1) & 7]
