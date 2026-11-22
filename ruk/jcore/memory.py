@@ -103,6 +103,34 @@ class Memory:
         return self._mem[start:end]
 
 
+class LittleEndianMemory(Memory):
+    """RAM/ROM storage for little-endian SH targets; MMIO stays numeric."""
+
+    byteorder = 'little'
+
+    def read16(self, addr):
+        if addr < 0 or addr + 2 > self._size:
+            raise IndexError(f'Out of bound read16: {addr:#x}')
+        m = self._mem
+        return m[addr] | (m[addr + 1] << 8)
+
+    def read32(self, addr):
+        if addr < 0 or addr + 4 > self._size:
+            raise IndexError(f'Out of bound read32: {addr:#x}')
+        m = self._mem
+        return m[addr] | (m[addr + 1] << 8) | (m[addr + 2] << 16) | (m[addr + 3] << 24)
+
+    def write16(self, addr, value):
+        if addr < 0 or addr + 2 > self._size:
+            raise IndexError(f'Out of bound write16: {addr:#x}')
+        self._mem[addr:addr+2] = (value & 0xffff).to_bytes(2, 'little')
+
+    def write32(self, addr, value):
+        if addr < 0 or addr + 4 > self._size:
+            raise IndexError(f'Out of bound write32: {addr:#x}')
+        self._mem[addr:addr+4] = (value & 0xffffffff).to_bytes(4, 'little')
+
+
 class MemoryPermission:
     READ_PERMISSION = 1
     WRITE_PERMISSION = 2

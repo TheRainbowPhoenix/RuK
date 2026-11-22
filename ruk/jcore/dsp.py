@@ -1,8 +1,17 @@
-"""SH DSP support under reconstruction.
+"""SH4AL-DSP support.
+
+Every P-operation family the Sdsha decoder recognizes is implemented:
+unary ops (PABS/PNEG/PDEC/PINC/PRND/PCOPY/PSWAP/PDMSB), two-source
+arithmetic (PADD/PSUB/PSUBC/PADDC), logic (PAND/PXOR/POR), shifts
+(PSHL/PSHA register and immediate forms), PCMP, PMULS, PSTS/PLDS,
+PCLR, and the PADD/PSUB/PCLR ... PMULS bundles -- each with its base,
+DCT and DCF variants. All semantics were differentially verified
+against Sdsha.dll handler-by-handler (tools/compare_sdsha_pops.py,
+20k+ cases, zero mismatches).
 
 MOVS and X/Y moves use the extracted CPU73050 and Sdsha decoder tables.
-Standalone PMULS, logical operations, copy, increment, decrement, swap,
-clear, and MAC transfers are implemented. Older helpers below remain experimental.
+The DSP repeat loop (LDRS/LDRE/LDRC + DSR.DC) lives in cpu.py; DCT/DCF
+variants gate on DSR.DC here.
 """
 
 from typing import Optional

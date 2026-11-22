@@ -1188,7 +1188,7 @@ class _Assembler:
             dz = self._POP_DZ[ops[1]]
             self.emit16(0xF800)
             self.emit16((0x1000 if mnem == 'psha' else 0x0000)
-                        | ((imm & 0x3F) << 4) | dz)
+                        | ((imm & 0x7F) << 4) | dz)
             return
 
         # ---- PSHL/PSHA Sx,Sy,Dz (register count) ----
@@ -1225,21 +1225,25 @@ class _Assembler:
         if mnem in self._POP_UNARY:
             src_name, dz_name = ops
             sx_base, sy_base = self._POP_UNARY[mnem]
-            # DCT/DCF deltas verified per family: pabs/pneg/prnd/pdec
-            # use base+2/+3 (Sdsha decoder); pcopy uses base+1.
-            marker_sx = 0x10 if mnem in ('pswap', 'prnd') else 0
-            marker_sy = 0x40 if mnem in ('pabs', 'pneg', 'prnd') else 0
-            delta = 2 if mnem in ('pabs', 'pneg', 'prnd', 'pdec') else 1
+            # PABS/PRND conditionals share opcode bytes with PDEC/PINC;
+            # marker bits distinguish their operand fields. PSWAP uses
+            # the same marker bits to distinguish it from PDMSB.
+            special_cond = cond and mnem in ('pabs', 'prnd')
+            marker_sx = 0x10 if mnem == 'pswap' or special_cond else 0
+            marker_sy = 0x40 if mnem == 'pswap' or special_cond else 0
+            delta = cond + int(bool(special_cond))
             if cond and mnem in ('pswap', 'pdmsb', 'pinc'):
                 raise ValueError(f'DCT/DCF encoding not pinned for {mnem}')
             if cond and mnem == 'pdec' and src_name in self._POP_SY:
                 raise ValueError(f'DCT/DCF encoding not pinned for {mnem}')
             if src_name in self._POP_SX:
-                word = (sx_base + cond * delta) << 8 | marker_sx \
-                    | self._POP_SX[src_name] << 6 | self._POP_DZ[dz_name]
+                word = (sx_base + delta) << 8 \
+                    | marker_sx | self._POP_SX[src_name] << 6 \
+                    | self._POP_DZ[dz_name]
             else:
-                word = (sy_base + cond * delta) << 8 | marker_sy \
-                    | self._POP_SY[src_name] << 4 | self._POP_DZ[dz_name]
+                word = (sy_base + delta) << 8 \
+                    | marker_sy | self._POP_SY[src_name] << 4 \
+                    | self._POP_DZ[dz_name]
             self.emit16(0xF800)
             self.emit16(word)
             return

@@ -5,6 +5,7 @@ from ruk.jcore.mmio import MMIODevice
 from ruk.jcore.btu_table import OPCODE_GATES, OPCODE_LENGTHS
 
 BASE = 0xFF280000
+SH3_BASE = 0xA4170000
 SIZE = 0x100
 MASK = 0xffffffff
 
@@ -25,8 +26,11 @@ def signed(v, bits=32):
 
 
 class SH7305BTU:
-    def __init__(self, cpg=None, max_instructions=1000000):
+    def __init__(self, cpg=None, max_instructions=1000000, *, byteorder='big'):
+        if byteorder not in ('big', 'little'):
+            raise ValueError('BTU byteorder must be big or little')
         self.cpg = cpg
+        self.byteorder = byteorder
         self.max_instructions = max_instructions
         self.regs = bytearray(SIZE)
         self.break_on_entry = False
@@ -136,12 +140,16 @@ class SH7305BTU:
             return read32(sp)
 
         def push64(value):
-            push(value >> 32)
-            push(value)
+            if self.byteorder == 'little':
+                push(value)
+                push(value >> 32)
+            else:
+                push(value >> 32)
+                push(value)
 
         def pop64():
-            lo = pop()
-            return (pop() << 32) | lo
+            top, bottom = pop(), pop()
+            return (top << 32) | bottom if self.byteorder == 'little' else (bottom << 32) | top
 
         def exit_to(code, event=False):
             external_sp = (sp - (4 if top_cursor else 0)) & MASK
@@ -400,9 +408,18 @@ class SH7305BTU:
         raise RuntimeError('BTU instruction budget exhausted; possible infinite bytecode loop')
 
 
-def attach_btu(cpu, cpg=None):
-    """Attach the SH7305 BTU to a CPU and its memory map."""
-    btu = SH7305BTU(cpg)
-    cpu.mem.add(BASE, MMIODevice(BASE, SIZE, btu, name='BTU'), name='BTU', perms='RW')
+def attach_btu(cpu, cpg=None, *, base=BASE, byteorder='big'):
+    """Attach the BTU; RAM/ROM regions must expose the target's word order.
+
+    MMIODevice translates region offsets to the canonical register block,
+    so the same register implementation can be mapped at the SH3 address.
+    """
+    btu = SH7305BTU(cpg, byteorder=byteorder)
+    cpu.mem.add(base, MMIODevice(BASE, SIZE, btu, name='BTU'), name='BTU', perms='RW')
     cpu.btu = btu
     return btu
+
+
+def attach_sh3_btu(cpu):
+    """SH3-DSP JBlend register map and LE slots; no SH3 clock/IRQ model."""
+    return attach_btu(cpu, base=SH3_BASE, byteorder='little')
