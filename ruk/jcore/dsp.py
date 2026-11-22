@@ -1039,6 +1039,55 @@ _DATA_TRANSFER = {0x6: 'dsr', 0x7: 'a0', 0x8: 'x0',
 _CONTROL_TRANSFER = {0x5: 'mod', 0x6: 'rs', 0x7: 're'}
 
 
+def classify_dsp_pop(word):
+    """Static legality of a P-operation second word.
+
+    Returns 'ok' when the handler executes the word, 'reserved' when it
+    decodes to a family but carries a reserved operand field (the real
+    decoder rejects it with an operand error), or None when the word is
+    not a P-operation at all.
+    """
+    opcode = word >> 8
+    dz = DSP_DZ_TABLE[word & 15]
+
+    if opcode <= 0x07:  # PSHL #imm,Dz
+        if dz is None:
+            return 'reserved'
+        imm = (word >> 4) & 0x3F
+        return 'ok' if imm <= 16 or imm >= 48 else 'reserved'
+    if 0x10 <= opcode <= 0x17:  # PSHA #imm,Dz
+        if dz is None:
+            return 'reserved'
+        raw = (word >> 4) & 0x7F
+        return 'reserved' if 0x21 <= raw <= 0x3F else 'ok'
+    if opcode == 0x84:  # PCMP Sx,Sy: bits 3:0 are a reserved field
+        return 'ok' if not word & 0xF else 'reserved'
+    if 0x81 <= opcode <= 0x83 or 0x91 <= opcode <= 0x93:
+        return 'ok' if dz is not None else 'reserved'
+    if (0x85 <= opcode <= 0x87 or 0xA0 <= opcode <= 0xA3
+            or 0xB0 <= opcode <= 0xB3):
+        return 'ok' if dz is not None else 'reserved'
+    if (0x95 <= opcode <= 0x97 or 0xA5 <= opcode <= 0xA7
+            or 0xB5 <= opcode <= 0xB7):  # PAND/PXOR/POR
+        return 'ok' if dz is not None else 'reserved'
+    if opcode in (0x8D, 0x8E, 0x8F):  # PCLR Dz
+        if word & 0xF0:
+            return None
+        return 'ok' if dz is not None else 'reserved'
+    if 0x88 <= opcode <= 0x8B or 0x98 <= opcode <= 0x9F             or 0xA8 <= opcode <= 0xAB or 0xB8 <= opcode <= 0xBF             or 0xC8 <= opcode <= 0xD3 or 0xD8 <= opcode <= 0xE3             or 0xE8 <= opcode <= 0xEF or 0xF8 <= opcode <= 0xFF:
+        # Unary families (PABS/PDEC/PINC/PNEG/PRND/PCOPY/PSWAP/PDMSB/
+        # PSTS/PLDS) and the logical trio: Dz validity, plus the
+        # selector-marker rules the handler applies.
+        if dz is None:
+            return 'reserved'
+        return 'ok'
+    if 0x40 <= opcode <= 0x4F:  # PMULS / PCLR Du PMULS
+        return 'ok' if not word & 0xF3 or word & 0xF0 == 0x10 else None
+    if 0x60 <= opcode <= 0x7F:  # PSUB/PADD ... PMULS bundles
+        return 'ok'
+    return None
+
+
 def handle_dsp_transfer(cpu, word: int) -> bool:
     """Execute register/memory DSP transfers using CPU73050 encodings."""
     if word in (0x0088, 0x0098, 0x00c8):

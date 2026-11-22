@@ -874,11 +874,21 @@ class _Assembler:
             raise ValueError(f'{mnem} encoding is not implemented')
 
         # ---- DSP: PADD / PSUB / PMULS / PCLR / etc. ----
-        if mnem.startswith('p') and len(mnem) > 1 and mnem[1:4] in (
-            'add', 'sub', 'mul', 'clr', 'cop', 'cmp', 'abs', 'neg',
-            'dec', 'inc', 'and', 'or', 'xor', 'shl', 'sha', 'sts',
-            'lds'):
-            raise ValueError(f'{mnem} encoding is not implemented')
+        if mnem in ('dct', 'dcf') and ops and ops[0].startswith('p'):
+            head = ops[0].split()
+            self._emit_pop(head[0], [mnem] + head[1:] + ops[1:], addr)
+            return
+        if mnem in ('padd', 'psub', 'psubc', 'paddc', 'pand', 'pxor',
+                    'por', 'pcmp', 'pmuls', 'pclr', 'psts', 'plds',
+                    'pabs', 'pdec', 'pinc', 'prnd', 'pneg', 'pcopy',
+                    'pswap', 'pdmsb', 'pshl', 'psha'):
+            if ops:
+                self._emit_pop(mnem, ops, addr); return
+            # Legacy bare form: single 16-bit opcode word (tests pin it).
+            op_class = self._DSP_OP_BASE.get(mnem)
+            if op_class is None:
+                raise ValueError(f'Unknown DSP operation: {mnem}')
+            self.emit16(0xF000 | op_class); return
 
         # ---- DSP: NOPX / NOPY ----
         if mnem == 'nopx':
@@ -1053,6 +1063,188 @@ class _Assembler:
         'paddc': 0xB0, 'psubc': 0xA0, 'pcmpgt': 0x85,
         'pcmpeq': 0x86, 'pcmplt': 0x87,
     }
+
+    # ---- Verified P-operation field maps (Sdsha-verified) ----
+    _POP_SX = {'x0': 0, 'x1': 1, 'a0': 2, 'a1': 3}
+    _POP_SY = {'y0': 0, 'y1': 1, 'm0': 2, 'm1': 3}
+    _POP_DZ = {'a1': 5, 'a0': 7, 'x0': 8, 'x1': 9,
+               'y0': 10, 'y1': 11, 'm0': 12, 'm1': 14}
+    _POP_SE = {'x0': 0, 'x1': 1, 'y0': 2, 'a1': 3}
+    _POP_SF = {'y0': 0, 'y1': 1, 'x0': 2, 'a1': 3}
+    _POP_DG = {'m0': 0, 'm1': 1, 'a0': 2, 'a1': 3}
+    _POP_DU = {'y0': 0, 'm0': 1, 'a0': 2, 'a1': 3}
+
+    # second-word opcode bases: two-source and unary (sx form, sy form)
+    _POP_BINARY = {'padd': 0xB1, 'psub': 0xA1, 'psubr': 0x85,
+                   'psubc': 0xA0, 'paddc': 0xB0, 'pand': 0x95,
+                   'pxor': 0xA5, 'por': 0xB5}
+    _POP_SHIFT_REG = {'pshl': 0x81, 'psha': 0x91}
+    _POP_UNARY = {
+        'pabs': (0x88, 0xA8), 'pdec': (0x89, 0xA9), 'pinc': (0x99, 0xB9),
+        'prnd': (0x98, 0xB8), 'pneg': (0xC9, 0xE9), 'pcopy': (0xD9, 0xF9),
+        'pswap': (0x9D, 0xBD), 'pdmsb': (0x9D, 0xBD),
+    }
+
+    def _pop_cond(self, mnem):
+        """Strip a DCT/DCF prefix from the mnemonic list; returns
+        (base_delta, remaining_mnemonic)."""
+        if mnem in ('dct', 'dcf'):
+            return (1 if mnem == 'dct' else 2), None
+        return 0, mnem
+
+    def _emit_pop(self, mnem, ops, addr):
+        """Emit a 32-bit DSP operation: 0xF800 leading word + P-op.
+
+        Encodings verified against the Sdsha.dll handlers (see
+        tools/compare_sdsha_pops.py) and the Renesas assembler matrix.
+        """
+        cond = 0
+        # normalize: split space-joined tokens and lowercase
+        ops = [t.lower() for o in ops for t in o.split()]
+        if mnem in ('dct', 'dcf'):
+            cond = 1 if mnem == 'dct' else 2
+            mnem, ops = ops[0], ops[1:]
+        elif ops and ops[0] in ('dct', 'dcf'):
+            cond = 1 if ops[0] == 'dct' else 2
+            mnem, ops = mnem, ops[1:]
+
+        # ---- PCLR [Du] [PMULS Se, Sf, Dg] ----
+        if mnem == 'pclr':
+            if 'pmuls' in ops:
+                i = ops.index('pmuls')
+                du_name = ops[0] if ops[0] != 'pmuls' else None
+                se, sf, dg = ops[i + 1], ops[i + 2], ops[i + 3]
+                if du_name is None:
+                    raise ValueError('PCLR PMULS requires a Du register')
+                word = (0x4010
+                        | self._POP_SE[se] << 10 | self._POP_SF[sf] << 8
+                        | self._POP_DG[dg] << 2 | self._POP_DU[du_name])
+                self.emit16(0xF800)
+                self.emit16(word)
+                return
+            dz = self._POP_DZ[ops[0]]
+            self.emit16(0xF800)
+            self.emit16((0x8D + cond) << 8 | dz)
+            return
+
+        # ---- PMULS standalone ----
+        if mnem == 'pmuls':
+            se, sf, dg = ops
+            word = (0x4000 | self._POP_SE[se] << 10
+                    | self._POP_SF[sf] << 8 | self._POP_DG[dg] << 2)
+            self.emit16(0xF800)
+            self.emit16(word)
+            return
+
+        # ---- PADD/PSUB Sx,Sy,Du [PMULS Se,Sf,Dg] bundles ----
+        if mnem in ('padd', 'psub') and 'pmuls' in ops:
+            i = ops.index('pmuls')
+            add_ops = ops[:i]
+            se, sf, dg = ops[i + 1], ops[i + 2], ops[i + 3]
+            sx_name, sy_name, du_name = add_ops[0], add_ops[1], add_ops[2]
+            base = self._POP_BINARY[mnem]
+            if cond:
+                raise ValueError(f'DCT/DCF is not valid for {mnem} PMULS')
+            word = ((0x7000 if mnem == 'padd' else 0x6000)
+                    | self._POP_SE[se] << 10 | self._POP_SF[sf] << 8
+                    | self._POP_SX[sx_name] << 6
+                    | self._POP_SY[sy_name] << 4
+                    | self._POP_DG[dg] << 2 | self._POP_DU[du_name])
+            self.emit16(0xF800)
+            self.emit16(word)
+            return
+
+        # ---- PCMP Sx,Sy ----
+        if mnem == 'pcmp':
+            if cond:
+                raise ValueError('DCT/DCF is not valid for pcmp')
+            sx, sy = ops
+            self.emit16(0xF800)
+            self.emit16(0x8400 | self._POP_SX[sx] << 6
+                        | self._POP_SY[sy] << 4)
+            return
+
+        # ---- PSTS/PLDS ----
+        if mnem == 'psts':
+            src_name, dz_name = ops
+            base = 0xCD if src_name == 'mach' else 0xDD
+            self.emit16(0xF800)
+            self.emit16((base + cond) << 8 | self._POP_DZ[dz_name])
+            return
+        if mnem == 'plds':
+            dz_name, src_name = ops
+            base = 0xED if src_name == 'mach' else 0xFD
+            self.emit16(0xF800)
+            self.emit16((base + cond) << 8 | self._POP_DZ[dz_name])
+            return
+
+        # ---- PSHL/PSHA #imm,Dz ----
+        # word = 0x0000/0x1000 | (imm & 0x3F) << 4 | Dz code; the Dz code
+        # sits at bits 7:4 (not 3:0) in the immediate-shift layout.
+        if mnem in ('pshl', 'psha') and ops[0].startswith('#'):
+            if cond:
+                raise ValueError(f'DCT/DCF is not valid for {mnem} #imm')
+            imm = int(ops[0][1:], 0)
+            dz = self._POP_DZ[ops[1]]
+            self.emit16(0xF800)
+            self.emit16((0x1000 if mnem == 'psha' else 0x0000)
+                        | ((imm & 0x3F) << 4) | dz)
+            return
+
+        # ---- PSHL/PSHA Sx,Sy,Dz (register count) ----
+        if mnem in ('pshl', 'psha'):
+            sx, sy, dz = ops
+            base = self._POP_SHIFT_REG[mnem] + cond
+            self.emit16(0xF800)
+            self.emit16(base << 8 | self._POP_SX[sx] << 6
+                        | self._POP_SY[sy] << 4 | self._POP_DZ[dz])
+            return
+
+        # ---- two-source PADD/PSUB/logical families ----
+        if mnem in ('padd', 'psub', 'psubc', 'paddc',
+                    'pand', 'pxor', 'por'):
+            a, b, dz = ops
+            if mnem == 'psub':
+                # argument order selects the source roles
+                if a in self._POP_SY and b in self._POP_SX:
+                    base = self._POP_BINARY['psubr'] + cond
+                    word = base << 8 | self._POP_SX[b] << 6 \
+                        | self._POP_SY[a] << 4 | self._POP_DZ[dz]
+                    self.emit16(0xF800)
+                    self.emit16(word)
+                    return
+                base = self._POP_BINARY['psub'] + cond
+            else:
+                base = self._POP_BINARY[mnem] + cond
+            self.emit16(0xF800)
+            self.emit16(base << 8 | self._POP_SX[a] << 6
+                        | self._POP_SY[b] << 4 | self._POP_DZ[dz])
+            return
+
+        # ---- unary families ----
+        if mnem in self._POP_UNARY:
+            src_name, dz_name = ops
+            sx_base, sy_base = self._POP_UNARY[mnem]
+            # DCT/DCF deltas verified per family: pabs/pneg/prnd/pdec
+            # use base+2/+3 (Sdsha decoder); pcopy uses base+1.
+            marker_sx = 0x10 if mnem in ('pswap', 'prnd') else 0
+            marker_sy = 0x40 if mnem in ('pabs', 'pneg', 'prnd') else 0
+            delta = 2 if mnem in ('pabs', 'pneg', 'prnd', 'pdec') else 1
+            if cond and mnem in ('pswap', 'pdmsb', 'pinc'):
+                raise ValueError(f'DCT/DCF encoding not pinned for {mnem}')
+            if cond and mnem == 'pdec' and src_name in self._POP_SY:
+                raise ValueError(f'DCT/DCF encoding not pinned for {mnem}')
+            if src_name in self._POP_SX:
+                word = (sx_base + cond * delta) << 8 | marker_sx \
+                    | self._POP_SX[src_name] << 6 | self._POP_DZ[dz_name]
+            else:
+                word = (sy_base + cond * delta) << 8 | marker_sy \
+                    | self._POP_SY[src_name] << 4 | self._POP_DZ[dz_name]
+            self.emit16(0xF800)
+            self.emit16(word)
+            return
+
+        raise ValueError(f'Unsupported DSP operation: {mnem} {ops}')
 
     def _emit_movs(self, mnem: str, ops: List[str]):
         """Encode the single-data MOVS forms in the F4xx-F7xx space."""
