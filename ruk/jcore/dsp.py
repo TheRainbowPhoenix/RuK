@@ -183,39 +183,65 @@ def _dsp_sat40(value, guard, saturate):
 
 
 def _dsp_write_flags(cpu, carry, negative, zero, overflow, gt=0, ge=0,
-                     rebuild=False):
+                     dc_override=None, mirror_overflow=None, or_merge=False):
     """Update DSR and SR.T after an unconditional P-operation.
 
     The mask-selected flag lands in DSR.DC and N/Z/OF/GT in bits 4-7;
     with the old DSR bit 8 set the same selector also drives SR.T and
-    the mirrors in bits 12-15.  Conditional (DCT/DCF) forms skip this
-    entirely.  gt/ge follow per-family rules: arithmetic results use
-    the signed 40-bit comparison, shifts force both to zero.
+    the mirrors in bits 12-15.  Everything outside bits 0 and 4-7 is
+    preserved.  Conditional (DCT/DCF) forms skip this entirely.  gt/ge
+    follow per-family rules: arithmetic results use the signed 40-bit
+    comparison, shifts force both to zero.
 
-    Sdsha's binary handlers (PADD/PSUB/PADDC/PSUBC and the PMULS
-    bundles) rebuild the whole DSR word, dropping the mask and T-control
-    bits of the input state; the unary, logical and shift families
-    preserve everything outside bits 0 and 4-7.  rebuild selects the
-    binary behaviour.
+    PSHA's shifter ORs its flag contributions into DSR without clearing
+    the previous N/Z/OF bits (or_merge); the arithmetic and unary
+    families replace bits 0 and 4-7 instead.
     """
     sr = cpu.regs['sr']
     old_dsr = cpu.regs['dsr']
     effective_overflow = int(overflow and not (sr & 2))
     choices = (carry, negative, zero, effective_overflow, gt, ge, 0, 0)
     dc = choices[(old_dsr >> 1) & 7]
+    if dc_override is not None:
+        # PADDC/PSUBC chain the carry through DSR.DC regardless of mask.
+        dc = dc_override
     dsr = ((effective_overflow << 4) | (negative << 5) | (zero << 6) |
            (gt << 7) | dc)
-    if not rebuild:
-        dsr |= old_dsr & ~0xF1
+    dsr |= old_dsr & ~0x1 if or_merge else old_dsr & ~0xF1
     if old_dsr & 0x100:
         selector = (old_dsr >> 9) & 7
         t_bit = choices[selector]
         if selector == 3 and overflow and (sr & 2):
             t_bit = 1
         cpu.regs['sr'] = (sr & ~1) | t_bit
-        dsr |= ((int(overflow) << 12) | (negative << 13) |
+        mirror = overflow if mirror_overflow is None else mirror_overflow
+        dsr |= ((int(mirror) << 12) | (negative << 13) |
                 (zero << 14) | (gt << 15))
     cpu.regs['dsr'] = dsr
+
+
+def _dsp_psha_clamp(cpu, value, guard, lost, exact):
+    """PSHA saturation and overflow.
+
+    SR.S clamps when the truncated result's guard byte disagrees with
+    its value sign, or when a left shift lost bits into a negative view
+    (either the truncated guard or the true product being negative);
+    the clamp direction follows the true sign of the shift product.
+
+    DSR.OF needs a shift to have happened and reports the guard/sign
+    mismatch, plus a left shift's lost bits while SR.S is clear.  The
+    pre-clamp mismatch also drives the DSR bit 12 mirror.
+    """
+    bit7_mismatch = bool(guard & 0x80) != bool(value & 0x80000000)
+    byte_mismatch = guard != (0xFF if value & 0x80000000 else 0)
+    saturate = bool(cpu.regs['sr'] & 2)
+    if saturate and (byte_mismatch or (lost and (exact < 0 or guard & 0x80))):
+        value = 0x80000000 if exact < 0 else 0x7FFFFFFF
+        guard = 0xFF if exact < 0 else 0
+    overflow = (bit7_mismatch or
+                (byte_mismatch and not saturate) or
+                (lost and (value != 0 or not saturate)))
+    return value, guard, overflow, byte_mismatch or (lost and saturate)
 
 
 def _dsp_arith_gt_ge(value, guard):
@@ -554,8 +580,10 @@ def _execute_standalone_pop(cpu, word):
             product, product_guard = _dsp_pmuls_product(cpu, se, sf)
             du = DSP_DU_TABLE[word & 3]
             dg = DSP_DG_TABLE[(word >> 2) & 3]
-            _dsp_store40(cpu, du, 0, 0)
             _dsp_store40(cpu, dg, product, product_guard)
+            _dsp_store40(cpu, du, 0, 0)
+            # The cleared Du drives the flags, like a standalone PCLR.
+            _dsp_write_flags(cpu, 0, 0, 1, False, *_dsp_arith_gt_ge(0, 0))
             cpu.pc = _u32(cpu.pc + 4)
             return True
         if top in (0x6, 0x7):
@@ -572,10 +600,11 @@ def _execute_standalone_pop(cpu, word):
             negative = int(bool(guard & 0x80))
             zero = int(guard == 0 and value == 0)
             gt, ge = _dsp_arith_gt_ge(value, guard)
-            _dsp_store40(cpu, du, value, guard)
+            # Sdsha commits the product before the PADD/PSUB part, so a
+            # shared DU/DG register ends up holding the add/sub result.
             _dsp_store40(cpu, dg, product, product_guard)
-            _dsp_write_flags(cpu, carry, negative, zero, overflow, gt, ge,
-                             rebuild=True)
+            _dsp_store40(cpu, du, value, guard)
+            _dsp_write_flags(cpu, carry, negative, zero, overflow, gt, ge)
             cpu.pc = _u32(cpu.pc + 4)
             return True
     return False
@@ -635,11 +664,11 @@ def _dsp_add_sub40(cpu, word, subtract, reversed_sources=False,
         result = (a40 - b40 - dc) & ((1 << 40) - 1)
         value = result & 0xFFFFFFFF
         guard = (result >> 32) & 0xFF
-        carry = int(a_value < b_value)
+        carry = int(a_value < b_value + dc)
         signed_overflow = int(
             bool(a_value ^ b_value) and bool((a_value ^ value) & 0x80000000))
     else:
-        low = a_value + b_value
+        low = a_value + b_value + dc
         carry_low = low >> 32
         value = _u32(low)
         guard = (a_guard + b_guard + carry_low) & 0xFF
@@ -687,7 +716,7 @@ def _dsp_padd_psub(cpu, word):
     _dsp_store40(cpu, dest, value, guard)
     if conditional == 0:
         _dsp_write_flags(cpu, carry, negative, zero, overflow, gt, ge,
-                         rebuild=True)
+                         dc_override=carry if with_carry else None)
     cpu.pc = _u32(cpu.pc + 4)
     return True
 
@@ -716,25 +745,23 @@ def _dsp_pcmp(cpu, word):
     return True
 
 
-def _dsp_shift16(cpu, value16, amount):
+def _dsp_shift16(value16, amount):
     """PSHL barrel shifter on a 16-bit value (Sdsha handler 0x10032ca0).
 
     amount is the signed 6-bit shift count.  Positive counts shift left
     with the last bit shifted out as carry; negative counts (bit 5 set)
     shift logically right.  Counts of +-16 return zero with the boundary
-    bit as carry; counts beyond +-16 return zero and force every flag
-    to zero.  Returns (value16, carry, flags_valid).
+    bit as carry; counts beyond +-16 are rejected. Returns
+    (value16, carry), or None for an unsupported count.
     """
     carry = 0
-    valid = True
     if amount & 0x20:
         n = 32 - (amount & 0x1F)
         if n == 16:
             carry = value16 >> 15
             value16 = 0
         elif n > 16:
-            value16 = 0
-            valid = False
+            return None
         else:
             carry = (value16 >> (n - 1)) & 1
             value16 = (value16 >> n) & 0xFFFF
@@ -742,60 +769,59 @@ def _dsp_shift16(cpu, value16, amount):
         carry = value16 & 1
         value16 = 0
     elif amount > 16:
-        value16 = 0
-        valid = False
+        return None
     elif amount:
         carry = (value16 << amount >> 16) & 1
         value16 = (value16 << amount) & 0xFFFF
-    return value16, carry, valid
+    return value16, carry
 
 
 def _dsp_psha_pair(pair, amount):
     """PSHA 40-bit pair shift (Sdsha handler 0x10032700).
 
-    pair is (guard << 32) | value; amount the signed 7-bit count.
-    Returns (value, guard, carry, overflow, wide) where wide is the
-    untruncated shift product for the count > 32 flag path.
+    pair is (guard << 32) | value; amount is the encoded 7-bit count.
+    Positive counts above 32 are rejected; negative counts down to -64
+    follow the reference handler's guard-byte behavior.
+    Returns (value, guard, carry, lost, exact) where lost reports bits
+    pushed past bit 39 and exact is the untruncated mathematical shift
+    result whose sign selects the saturation direction.
     """
-    carry = 0
-    overflow = False
-    wide = 0
     if amount & 0x40:
         n = 64 - (amount & 0x3F)
         signed = pair - (1 << 40) if pair & (1 << 39) else pair
-        guard = (pair >> 32) & 0xFF
-        if n <= 31:
-            shifted = signed >> n
-            carry = (pair >> (n - 1)) & 1
-            wide = shifted
-            return shifted & 0xFFFFFFFF, (shifted >> 32) & 0xFF, carry, \
-                overflow, wide
+        exact = signed >> n
         if n == 32:
+            # Right by 32: the sign-extended guard byte becomes the
+            # whole result; the carry reflects the old value sign.
+            guard = (pair >> 32) & 0xFF
             value = pair & 0xFFFFFFFF
             carry = int(bool(value & 0x80000000))
-            sext = 0xFF if guard & 0x80 else 0
-            return guard, sext, carry, overflow, guard
-        # n in 32..64: the guard byte alone survives the shift.
-        sext_guard = guard - (1 << 8) if guard & 0x80 else guard
-        v22 = n - 32
-        carry = (guard >> (v22 - 1)) & 1 if v22 <= 8 else 0
-        value = (sext_guard >> v22) & 0xFFFFFFFF if v22 <= 8 else sext_guard
-        wide = value
-        return value, (0xFF if guard & 0x80 else 0), carry, overflow, wide
+            sext = guard - (1 << 8) if guard & 0x80 else guard
+            return sext & 0xFFFFFFFF, (0xFF if guard & 0x80 else 0), \
+                carry, False, sext
+        guard = (pair >> 32) & 0xFF
+        if n > 32:
+            # Right by 33..64: only the guard byte survives, shifted
+            # with x86 count masking (a count of 32 shifts by zero).
+            shift = (n - 32) & 31
+            sext = guard - (1 << 8) if guard & 0x80 else guard
+            value = (sext >> shift) & 0xFFFFFFFF
+            carry = (sext >> (shift - 1)) & 1 if shift else 0
+            result = value - (1 << 32) if value & 0x80000000 else value
+            return value, (0xFF if guard & 0x80 else 0), carry, \
+                False, result
+        carry = (pair >> (n - 1)) & 1
+        return exact & 0xFFFFFFFF, (exact >> 32) & 0xFF, carry, False, exact
     if amount == 0:
-        return pair & 0xFFFFFFFF, (pair >> 32) & 0xFF, 0, False, pair
+        exact = pair - (1 << 40) if pair & (1 << 39) else pair
+        return pair & 0xFFFFFFFF, (pair >> 32) & 0xFF, 0, False, exact
     if amount <= 32:
-        wide = pair << amount
-        value = wide & 0xFFFFFFFF
-        guard = (wide >> 32) & 0xFF
-        carry = (wide >> 32) & 1
-        sext = 0xFF if value & 0x80000000 else 0
-        overflow = guard != sext or (wide >> 40) != 0
-        return value, guard, carry, overflow, wide
-    # amount 33..63: the guard byte keeps the residue of the value part.
-    value = pair & 0xFFFFFFFF
-    wide = value << (amount - 32)
-    return 0, wide & 0xFF, 0, int(bool(value & 0x80000000)), wide
+        signed = pair - (1 << 40) if pair & (1 << 39) else pair
+        exact = signed << amount
+        carry = (exact >> 32) & 1
+        lost = int(not (-(1 << 39) <= exact < (1 << 39)))
+        return exact & 0xFFFFFFFF, (exact >> 32) & 0xFF, carry, lost, exact
+    return None
 
 
 def _dsp_load_pair(cpu, name):
@@ -826,32 +852,29 @@ def _dsp_pshl_psha(cpu, word, arithmetic):
     count_reg = DSP_SYLOAD_TABLE[(word >> 4) & 3]
     raw_amount = (cpu.regs[count_reg] >> 16) & (0x7F if arithmetic else 0x3F)
     if arithmetic:
-        value, guard, carry, overflow, wide = _dsp_psha_pair(
-            _dsp_load_pair(cpu, src), raw_amount)
+        shifted = _dsp_psha_pair(_dsp_load_pair(cpu, src), raw_amount)
+        if shifted is None:
+            return False
+        value, guard, carry, lost, exact = shifted
+        value, guard, overflow, mirror = _dsp_psha_clamp(
+            cpu, value, guard, lost, exact)
     else:
-        value16, carry, valid = _dsp_shift16(
-            (cpu.regs[src] >> 16) & 0xFFFF, raw_amount)
+        # PSHL never saturates and never reports overflow.
+        shifted = _dsp_shift16((cpu.regs[src] >> 16) & 0xFFFF, raw_amount)
+        if shifted is None:
+            return False
+        value16, carry = shifted
         value = value16 << 16
         guard = 0
         overflow = False
-        wide = value16
-        if not valid:
-            carry = 0
-    if conditional == 0:
-        value, guard, sat_overflow = _dsp_sat40(
-            value, guard, bool(cpu.regs['sr'] & 2))
-        overflow = overflow or sat_overflow
+        mirror = False
     _dsp_store40(cpu, dest, value, guard)
     if conditional == 0:
         negative = int(bool(guard & 0x80)) if arithmetic \
             else int(bool(value & 0x80000000))
-        if arithmetic and raw_amount > 32 and not (raw_amount & 0x40):
-            # count > 32 flags come from the untruncated shift product
-            negative = int(bool(wide & (1 << 39)))
-            zero = int(wide == 0)
-        else:
-            zero = int(value == 0 and guard == 0)
-        _dsp_write_flags(cpu, carry, negative, zero, overflow)
+        zero = int(value == 0 and guard == 0)
+        _dsp_write_flags(cpu, carry, negative, zero, overflow,
+                         mirror_overflow=mirror, or_merge=arithmetic)
     cpu.pc = _u32(cpu.pc + 4)
     return True
 
@@ -867,29 +890,27 @@ def _dsp_shift_imm(cpu, word, arithmetic):
     if dest is None:
         return False
     if arithmetic:
-        value, guard, carry, overflow, wide = _dsp_psha_pair(
-            _dsp_load_pair(cpu, dest), raw_amount)
+        shifted = _dsp_psha_pair(_dsp_load_pair(cpu, dest), raw_amount)
+        if shifted is None:
+            return False
+        value, guard, carry, lost, exact = shifted
+        value, guard, overflow, mirror = _dsp_psha_clamp(
+            cpu, value, guard, lost, exact)
     else:
-        value16, carry, valid = _dsp_shift16(
-            (cpu.regs[dest] >> 16) & 0xFFFF, raw_amount)
+        shifted = _dsp_shift16((cpu.regs[dest] >> 16) & 0xFFFF, raw_amount)
+        if shifted is None:
+            return False
+        value16, carry = shifted
         value = value16 << 16
         guard = 0
         overflow = False
-        wide = value16
-        if not valid:
-            carry = 0
-    value, guard, sat_overflow = _dsp_sat40(
-        value, guard, bool(cpu.regs['sr'] & 2))
-    overflow = overflow or sat_overflow
+        mirror = False
     _dsp_store40(cpu, dest, value, guard)
     negative = int(bool(guard & 0x80)) if arithmetic \
         else int(bool(value & 0x80000000))
-    if arithmetic and raw_amount > 32 and not (raw_amount & 0x40):
-        negative = int(bool(wide & (1 << 39)))
-        zero = int(wide == 0)
-    else:
-        zero = int(value == 0 and guard == 0)
-    _dsp_write_flags(cpu, carry, negative, zero, overflow)
+    zero = int(value == 0 and guard == 0)
+    _dsp_write_flags(cpu, carry, negative, zero, overflow,
+                     mirror_overflow=mirror, or_merge=arithmetic)
     cpu.pc = _u32(cpu.pc + 4)
     return True
 
