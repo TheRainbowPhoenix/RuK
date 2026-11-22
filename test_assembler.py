@@ -387,133 +387,59 @@ class TestDSPInstructions(unittest.TestCase):
         """LDRC Rm -- load repeat count from register."""
         self.assertEqual(self._op('ldrc r3'), 0x4334)
 
-    def test_movs_w_direct(self):
-        """MOVS.W @As, Ds (direct addressing)."""
-        # @r4, a0 -> As=0, Ds=7, mode=4 (word direct)
-        # Encoding: 0000_00aa_dddd_mmmm = 0x0074
-        op = self._op('movs.w @r4, a0')
-        self.assertEqual(op, 0x0074)
-
-    def test_movs_w_postinc(self):
-        """MOVS.W @As+, Ds (post-increment)."""
-        # @r5+, y0 -> As=1, Ds=8, mode=12
-        # Encoding: 0x18C = 0x018C
-        op = self._op('movs.w @r5+, y0')
-        self.assertEqual(op, 0x018C)
-
-    def test_movs_l_direct(self):
-        """MOVS.L @As, Ds (direct, long)."""
-        # @r2, x0 -> As=2, Ds=12, mode=6
-        # Encoding: 0x2C6 = 0x02C6
-        op = self._op('movs.l @r2, x0')
-        self.assertEqual(op, 0x02C6)
-
-    def test_movs_l_predec(self):
-        """MOVS.L @-As, Ds (pre-decrement, long)."""
-        # @-r3, a1 -> As=3, Ds=5, mode=10
-        # Encoding: 0x35A = 0x035A
-        op = self._op('movs.l @-r3, a1')
-        self.assertEqual(op, 0x035A)
-
-    def test_nopx(self):
-        self.assertEqual(self._op('nopx'), 0xF400)
-
-    def test_nopy(self):
-        self.assertEqual(self._op('nopy'), 0xF500)
-
-    def test_padd(self):
-        """PADD -- DSP add."""
-        self.assertEqual(self._op('padd'), 0xF0B1)
-
-    def test_psub(self):
-        self.assertEqual(self._op('psub'), 0xF0A1)
-
-    def test_pmuls(self):
-        self.assertEqual(self._op('pmuls'), 0xF040)
-
-    def test_pclr(self):
-        self.assertEqual(self._op('pclr'), 0xF08D)
-
-    def test_pcopy(self):
-        self.assertEqual(self._op('pcopy'), 0xF0BD)
-
-    def test_pabs(self):
-        self.assertEqual(self._op('pabs'), 0xF088)
-
-    def test_pneg(self):
-        self.assertEqual(self._op('pneg'), 0xF0A8)
-
-    def test_pand(self):
-        self.assertEqual(self._op('pand'), 0xF095)
-
-    def test_por(self):
-        self.assertEqual(self._op('por'), 0xF0B5)
-
-    def test_pxor(self):
-        self.assertEqual(self._op('pxor'), 0xF0A5)
-
-    def test_pshl(self):
-        self.assertEqual(self._op('pshl'), 0xF000)
-
-    def test_psha(self):
-        self.assertEqual(self._op('psha'), 0xF010)
-
-    def test_psts(self):
-        self.assertEqual(self._op('psts'), 0xF0CD)
-
-    def test_plds(self):
-        self.assertEqual(self._op('plds'), 0xF0ED)
-
-    def test_padd_dct(self):
-        """PADD with DCT prefix (conditional on repeat counter true)."""
-        self.assertEqual(self._op('padd dct'), 0xF0B2)
-
-    def test_padd_dcf(self):
-        """PADD with DCF prefix (conditional on repeat counter false)."""
-        self.assertEqual(self._op('padd dcf'), 0xF0B3)
+    def test_movs_reference_encodings(self):
+        vectors = {
+            'movs.w @r4, a0': 'f474',
+            'movs.w @r5+, y0': 'f5a8',
+            'movs.l @r2, x0': 'f686',
+            'movs.l @-r3, a1': 'f752',
+        }
+        for source, expected in vectors.items():
+            with self.subTest(source=source):
+                self.assertEqual(self._asm(source).hex(), expected)
 
     def test_movs_all_data_regs(self):
-        """MOVS.W with all valid DSP data registers."""
-        for reg, ds_idx in [('a1', 5), ('a0', 7), ('y0', 8), ('y1', 9),
-                            ('m0', 10), ('m1', 11), ('x0', 12),
-                            ('a1g', 13), ('x1', 14), ('a0g', 15)]:
-            op = self._op(f'movs.w @r4, {reg}')
-            expected = (0 << 8) | (ds_idx << 4) | 4  # As=0, mode=4
-            self.assertEqual(op, expected, f"MOVS.W @r4, {reg} = 0x{expected:04X}")
+        for reg, ds in [('a1', 5), ('a0', 7), ('x0', 8), ('x1', 9),
+                        ('y0', 10), ('y1', 11), ('m0', 12), ('a1g', 13),
+                        ('m1', 14), ('a0g', 15)]:
+            self.assertEqual(self._op(f'movs.w @r4, {reg}'), 0xF404 | ds << 4)
 
     def test_movs_all_addr_regs(self):
-        """MOVS.W with all DSP address registers."""
-        for reg, as_idx in [('r4', 0), ('r5', 1), ('r2', 2), ('r3', 3)]:
-            op = self._op(f'movs.w @{reg}, a0')
-            expected = (as_idx << 8) | (7 << 4) | 4  # Ds=7, mode=4
-            self.assertEqual(op, expected, f"MOVS.W @{reg}, a0 = 0x{expected:04X}")
+        for reg, index in [('r4', 0), ('r5', 1), ('r2', 2), ('r3', 3)]:
+            self.assertEqual(self._op(f'movs.w @{reg}, a0'), 0xF474 | index << 8)
+
+    def test_pop_reference_encodings(self):
+        vectors = {
+            'padd x0,y0,a1': 'f800b105', 'psub x0,y0,a1': 'f800a105',
+            'pmuls x0,y0,m0': 'f8004000', 'pclr a0': 'f8008d07',
+            'pcopy x0,a0': 'f800d907', 'pabs x0,a0': 'f8008807',
+            'pneg x0,a0': 'f800c907', 'pand x0,y0,a0': 'f8009507',
+            'por x0,y0,a0': 'f800b507', 'pxor x0,y0,a0': 'f800a507',
+            'pshl #1,a0': 'f8000017', 'psha #1,a0': 'f8001017',
+            'psts mach,a0': 'f800cd07', 'plds a0,mach': 'f800ed07',
+            'dct padd x0,y0,a1': 'f800b205', 'dcf padd x0,y0,a1': 'f800b305',
+        }
+        for source, expected in vectors.items():
+            with self.subTest(source=source):
+                self.assertEqual(self._asm(source).hex(), expected)
+
+    def test_operandless_pop_and_isolated_move_slots_rejected(self):
+        for source in ('padd', 'padd dct', 'nopx', 'nopy'):
+            with self.subTest(source=source), self.assertRaises(ValueError):
+                self._asm(source)
 
     def test_dsp_repeat_loop(self):
-        """Assemble a complete DSP repeat loop."""
         code = """
             ldrs loop_start
             ldre loop_end
-            ldrc #8
+            setrc #8
             loop_start:
             movs.w @r4+, x0
-            padd
+            padd x0,y0,a1
             loop_end:
-            nopx
             nop
         """
-        binary = self._asm(code)
-        self.assertGreater(len(binary), 10)
-        # Verify LDRS, LDRE, LDRC are present
-        ops = [struct.unpack('>H', binary[i:i+2])[0]
-               for i in range(0, len(binary), 2)]
-        # LDRS = 0x8Cxx
-        self.assertTrue(any((o & 0xFF00) == 0x8C00 for o in ops))
-        # LDRE = 0x8Exx
-        self.assertTrue(any((o & 0xFF00) == 0x8E00 for o in ops))
-        # LDRC #8 = 0x8A08
-        self.assertIn(0x8A08, ops)
-        # PADD = 0xF0B1
-        self.assertIn(0xF0B1, ops)
+        self.assertEqual(self._asm(code).hex(), '8c018e038208f488f800b1050009')
 
 
 class TestAddressingModes(unittest.TestCase):

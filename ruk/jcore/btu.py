@@ -408,6 +408,21 @@ class SH7305BTU:
         raise RuntimeError('BTU instruction budget exhausted; possible infinite bytecode loop')
 
 
+class SH3DSPBTU(SH7305BTU):
+    """A5407CA-observed MMIO widths and little-endian 64-bit slots."""
+
+    def __init__(self, max_instructions=1000000):
+        super().__init__(max_instructions=max_instructions, byteorder='little')
+
+    def read16(self, addr):
+        return self.read32(addr) if addr - BASE in (0xc, 0x10, 0x14) else 0
+
+    def write16(self, addr, value):
+        # 800769EA/800769F0/800769F4 in A5407CA initialize these with MOV.W.
+        if addr - BASE in (0xc, 0x10, 0x14):
+            self.write32(addr, value & 0xffff)
+
+
 def attach_btu(cpu, cpg=None, *, base=BASE, byteorder='big'):
     """Attach the BTU; RAM/ROM regions must expose the target's word order.
 
@@ -422,4 +437,7 @@ def attach_btu(cpu, cpg=None, *, base=BASE, byteorder='big'):
 
 def attach_sh3_btu(cpu):
     """SH3-DSP JBlend register map and LE slots; no SH3 clock/IRQ model."""
-    return attach_btu(cpu, base=SH3_BASE, byteorder='little')
+    btu = SH3DSPBTU()
+    cpu.mem.add(SH3_BASE, MMIODevice(BASE, SIZE, btu, name='SH3 BTU'), name='SH3 BTU', perms='RW')
+    cpu.btu = btu
+    return btu

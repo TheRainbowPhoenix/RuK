@@ -253,6 +253,10 @@ class _Assembler:
         # shll4/shlr4 expand to two instructions (4 bytes)
         if mnem in ('shll4', 'shlr4'):
             return 4
+        if mnem in ('dct', 'dcf') or mnem in self._POP_UNARY or mnem in (
+            'pclr', 'padd', 'psub', 'psubc', 'paddc', 'pand', 'pxor',
+            'por', 'pcmp', 'pmuls', 'psts', 'plds', 'pshl', 'psha'):
+            return 4
         return 2
 
     # ---- pass 2: emit code ----
@@ -861,6 +865,19 @@ class _Assembler:
             if m is not None:
                 self.emit16(0x4000 | (m << 8) | 0x34); return
 
+        if mnem == 'setrc':
+            if len(ops) != 1:
+                raise ValueError('SETRC requires one register or immediate')
+            if ops[0].startswith('#'):
+                imm = parse_imm(ops[0])
+                if imm is None or not 0 <= imm <= 255:
+                    raise ValueError('SETRC immediate must be in 0..255')
+                self.emit16(0x8200 | imm); return
+            reg = parse_reg(ops[0])
+            if reg is None:
+                raise ValueError('SETRC requires a general register')
+            self.emit16(0x4014 | (reg << 8)); return
+
         # ---- DSP: MOVS.W / MOVS.L ----
         # Encoding: 0000_00aa_dddd_mmmm
         #   aa = As index (0=r4, 1=r5, 2=r2, 3=r3)
@@ -882,13 +899,9 @@ class _Assembler:
                     'por', 'pcmp', 'pmuls', 'pclr', 'psts', 'plds',
                     'pabs', 'pdec', 'pinc', 'prnd', 'pneg', 'pcopy',
                     'pswap', 'pdmsb', 'pshl', 'psha'):
-            if ops:
-                self._emit_pop(mnem, ops, addr); return
-            # Legacy bare form: single 16-bit opcode word (tests pin it).
-            op_class = self._DSP_OP_BASE.get(mnem)
-            if op_class is None:
-                raise ValueError(f'Unknown DSP operation: {mnem}')
-            self.emit16(0xF000 | op_class); return
+            if not ops:
+                raise ValueError(f'{mnem} requires operands')
+            self._emit_pop(mnem, ops, addr); return
 
         # ---- DSP: NOPX / NOPY ----
         if mnem == 'nopx':

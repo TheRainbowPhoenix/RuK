@@ -48,7 +48,7 @@ class TestNoFakeOpcodes(unittest.TestCase):
         self._check_no_fake_nops(binary, code)
 
     def test_dsp_program(self):
-        code = 'ldrs start\nldre end\nldrc #8\nstart: padd\nend: nopx\nnop'
+        code = 'ldrs start\nldre end\nsetrc #8\nstart: padd x0,y0,a1\nend: nop'
         binary = assemble(code, 0)
         self._check_no_fake_nops(binary, code)
 
@@ -71,9 +71,7 @@ class TestNoFakeOpcodes(unittest.TestCase):
             'ldc r0, sr', 'stc sr, r0',
             'lds r0, pr', 'sts pr, r0',
             'trapa #0',
-            'nopx', 'nopy',
-            'padd', 'psub', 'pmuls', 'pclr', 'pcopy',
-            'pabs', 'pneg', 'pand', 'por', 'pxor',
+            'setrc #8', 'setrc r1',
         ]
         for instr in instructions:
             binary = assemble(instr, 0)

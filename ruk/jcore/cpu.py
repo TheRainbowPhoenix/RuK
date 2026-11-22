@@ -383,9 +383,8 @@ class CPU:
         self._step_count = 0
         self.on_step = None  # callback(step_count: int) -> None
 
-        # DSP repeat-loop active flag.  Set to True by LDRS/LDRE/LDRC
-        # handlers when RC > 0; cleared by the step() loop when RC
-        # reaches 0.  This gates the per-step RE/RS check so the common
+        # DSP repeat-loop active flag, armed by repeat setup and cleared
+        # by step() when RC reaches zero. This gates the RE/RS check so the common
         # case (no DSP loop active) pays zero cost.
         self._dsp_active = False
 
@@ -567,23 +566,24 @@ class CPU:
 
             # ---- DSP repeat-loop handling (SH4AL-DSP zero-overhead loop) ----
             # Only check if a repeat loop is currently active (RC > 0).
-            # The LDRS/LDRE/LDRC handlers set _dsp_active = True; the
-            # loop-exhaustion path below sets it back to False.
+            # The loop-exhaustion path sets _dsp_active back to False.
             if self._dsp_active:
-                pc_now = self.pc & 0xFFFFFFFF
-                re_addr = self.regs._sys['re']
-                if pc_now == re_addr:
+                re_addr = self.regs._sys['re'] & ~1
+                is_setrc = (op_val & 0xf0ff) == 0x4014 or (op_val & 0xff00) == 0x8200
+                size = 4 if (op_val & 0xfc00) == 0xf800 else 2
+                fell_through = self.pc == ((pre_pc + size) & 0xffffffff)
+                if pre_pc == re_addr and not is_setrc and fell_through:
                     rc = self.regs._sys['rc']
                     if rc > 0:
                         new_rc = rc - 1
                         self.regs._sys['rc'] = new_rc
+                        self.regs._sys['sr'] = ((self.regs._sys['sr'] & ~0x0fff0000)
+                                                | ((new_rc & 0xfff) << 16))
                         if new_rc > 0:
                             # Loop continues: branch back to RS.
-                            self.regs._sys['dsr'] |= 1
                             self.pc = self.regs._sys['rs'] & 0xFFFFFFFF
                         else:
                             # Loop just ended: fall through past RE.
-                            self.regs._sys['dsr'] &= ~1 & 0xFFFFFFFF
                             self._dsp_active = False
 
         except IndexError:

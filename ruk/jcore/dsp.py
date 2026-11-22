@@ -1099,6 +1099,41 @@ def classify_dsp_pop(word):
 
 def handle_dsp_transfer(cpu, word: int) -> bool:
     """Execute register/memory DSP transfers using CPU73050 encodings."""
+    if (word & 0xf0ff) == 0x4014 or (word & 0xff00) == 0x8200:
+        if not _sr_dsp_is_set(cpu):
+            return False
+        count = (word & 0xff) if word >> 8 == 0x82 else cpu.regs[(word >> 8) & 15] & 0xfff
+        rs, re = cpu.regs['rs'], cpu.regs['re']
+        difference = _u32(re - rs)
+        if difference & 0x80000000:
+            difference -= 0x100000000
+        mode = ((difference & 2) >> 1) if difference < 0 else (3 if difference == 0 else 2)
+        if re & 1:
+            mode = 0
+        cpu.regs['sr'] = (cpu.regs['sr'] & ~0x0fff000c) | (count << 16) | (mode << 2)
+        cpu.regs['rc'] = count
+        # SH4AL converts the conventional loop to its extended format:
+        # RE identifies the instruction three slots before the loop end.
+        # Short loops use RS-RE to encode their length instead of a start.
+        if not re & 1:
+            try:
+                address = _u32(re - 4)
+                def next_instruction(at):
+                    first = cpu.mem.read16(at)
+                    return _u32(at + (4 if first & 0xfc00 == 0xf800 else 2))
+                start = next_instruction(address)
+                end = start
+                for _ in range(mode if mode < 3 else 2):
+                    end = next_instruction(end)
+                if mode != 2:
+                    cpu.regs['rs'] = start
+                cpu.regs['re'] = end | 1
+            except IndexError:
+                # An unmapped future loop is diagnosed on instruction fetch.
+                pass
+        cpu._dsp_active = bool(count)
+        cpu.pc = _u32(cpu.pc + 2)
+        return True
     if word in (0x0088, 0x0098, 0x00c8):
         if not _sr_dsp_is_set(cpu):
             return False
