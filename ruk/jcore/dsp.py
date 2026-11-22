@@ -597,6 +597,12 @@ def _execute_standalone_pop(cpu, word):
                 result, result_guard, bool(cpu.regs['sr'] & 2))
             du = DSP_DU_TABLE[word & 3]
             dg = DSP_DG_TABLE[(word >> 2) & 3]
+            # Unlike every other PADD/PSUB form, the ADD bundle does not
+            # keep a half-carried guard byte: without SR.S a mismatched
+            # guard collapses to the sign of the value.
+            if top == 0x7 and overflow and not cpu.regs['sr'] & 2:
+                guard = 0xFF if value & 0x80000000 else 0
+                overflow = False
             negative = int(bool(guard & 0x80))
             zero = int(guard == 0 and value == 0)
             gt, ge = _dsp_arith_gt_ge(value, guard)

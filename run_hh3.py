@@ -12,6 +12,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from ruk.classpad import Classpad
 from ruk.jcore.hh3 import run_hh3, parse_elf, get_metadata
+from ruk.jcore.btu import BTUEntryBreakpoint
+from ruk.jcore.hh3_hle import HH3WaitKey, VRAM
 
 
 def main():
@@ -26,7 +28,14 @@ def main():
     parser.add_argument('--hle-root', help='read-only directory mounted as fls0')
     parser.add_argument('--hle-font', help='95 RGB565 glyphs extracted from a compatible OS')
     parser.add_argument('--single-step', action='store_true', help='use the instruction interpreter')
+    parser.add_argument('--engine', choices=('cached', 'jit', 'step'), help='defaults to cached with HLE, jit otherwise')
+    parser.add_argument('--class-name', help='Java main class passed as the first launcher argument')
+    parser.add_argument('--stop-at-j-jp', action='store_true', help='pause before the first BTU handoff')
+    parser.add_argument('--btu-trace', help='write BTU counters and the first 32 handoffs as JSON')
+    parser.add_argument('--screen-output', help='save the final LCD framebuffer as an image (requires Pillow)')
     args = parser.parse_args()
+    if args.btu_trace and not args.btu:
+        parser.error('--btu-trace requires --btu')
     hh3_path, max_steps = args.hh3_path, args.max_steps
 
     # 1. Print hh3 metadata
@@ -68,13 +77,18 @@ def main():
         with_display=True, with_bsc=True, with_cpg=True,
         with_btu=args.btu,
     )
-    if args.single_step:
+    engine = 'step' if args.single_step else args.engine or ('cached' if args.hle_root else 'jit')
+    if engine != 'jit':
         cp.cpu.debug = True  # propagate memory/decoder failures to the runner
+    if args.stop_at_j_jp:
+        if not args.btu:
+            parser.error('--stop-at-j-jp requires --btu')
+        cp.cpu.btu.break_on_entry = True
 
     # 4. Load and run the hh3
     print(f"\nLoading {os.path.basename(hh3_path)}...")
     entry = run_hh3(cp, hh3_path,
-                    argv=[os.path.basename(hh3_path)],
+                    argv=[os.path.basename(hh3_path)] + ([args.class_name] if args.class_name else []),
                     envp=None if args.hle_root else {'HHK_SYMBOL_TABLE': '0',
                           'HHK_SYMBOL_TABLE_LEN': '0'}, hle_root=args.hle_root,
                     hle_font=args.hle_font)
@@ -87,15 +101,23 @@ def main():
     # 5. Run
     print(f"\nRunning ({max_steps:,} steps max)...")
     t0 = time.perf_counter()
+    failed = False
     try:
-        if args.single_step:
+        if engine == 'step':
             steps = 0
             while steps < max_steps and not cp.cpu.ebreak and cp.cpu.pc != 0xffffffff:
                 cp.cpu.step()
                 steps += 1
+        elif engine == 'cached':
+            from ruk.jcore.hh3_runner import run_cached
+            steps = run_cached(cp.cpu, max_steps)
         else:
             steps = cp.cpu.run(max_steps=max_steps)
+    except (BTUEntryBreakpoint, HH3WaitKey) as e:
+        print(f'Paused: {e}')
+        steps = cp.cpu._step_count
     except Exception as e:
+        failed = True
         print(f"Exception: {e!r}")
         import traceback; traceback.print_exc()
         steps = cp.cpu._step_count
@@ -109,6 +131,28 @@ def main():
     print(f"  ebreak:       {cp.cpu.ebreak}")
     if args.hle_root:
         print(f"  HH3 services: {cp.cpu.hh3_hle.calls}")
+    if args.btu:
+        btu = cp.cpu.btu
+        print(f'  BTU: {btu.entries} J_JP entries, {btu.enabled_entries} enabled; exits {dict(btu.exits)}')
+        print(f'  Last BTU entry: {btu.last_entry}; exit: {btu.last_exit}')
+        print(f'  Java bytecodes: {dict(sorted(btu.bytecodes.items()))}')
+        if args.btu_trace:
+            import json
+            with open(args.btu_trace, 'w', encoding='utf-8') as f:
+                json.dump(dict(entries=btu.entries, enabled_entries=btu.enabled_entries,
+                               exits=btu.exits, bytecodes=btu.bytecodes,
+                               first_handoffs=btu.first_handoffs,
+                               last_entry=btu.last_entry, last_exit=btu.last_exit), f, indent=2)
+    if args.screen_output:
+        from PIL import Image
+        pixels = bytearray()
+        for offset in range(0, 0x52800, 2):
+            color = cp.mem.read16(VRAM + offset)
+            pixels.extend((((color >> 11) & 31) * 255 // 31,
+                           ((color >> 5) & 63) * 255 // 63,
+                           (color & 31) * 255 // 31))
+        Image.frombytes('RGB', (320, 528), bytes(pixels)).save(args.screen_output)
+        print(f'  LCD image: {args.screen_output}')
     if hasattr(cp.cpu, 'jit_stats'):
         print(f"  JIT stats:    {cp.cpu.jit_stats()}")
 
@@ -118,7 +162,8 @@ def main():
     print(f"  R8 =0x{r[8]:08X}  R9 =0x{r[9]:08X}  R10=0x{r[10]:08X}  R11=0x{r[11]:08X}")
     print(f"  R12=0x{r[12]:08X}  R13=0x{r[13]:08X}  R14=0x{r[14]:08X}  R15=0x{r[15]:08X}")
     print(f"  PR =0x{r['pr']:08X}  SR =0x{r['sr']:08X}")
+    return 1 if failed else 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

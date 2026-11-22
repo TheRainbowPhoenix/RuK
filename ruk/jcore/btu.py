@@ -1,9 +1,14 @@
 """Experimental SH7305 bytecode translation unit."""
 from ruk.jcore.mmio import MMIODevice
+from collections import Counter
 
 BASE = 0xFF280000
 SIZE = 0x100
 MASK = 0xffffffff
+
+
+class BTUEntryBreakpoint(Exception):
+    """Host debugger pause immediately before a J_JP handoff."""
 
 # Java instructions with one operand byte. Other software exits carry two
 # operand bytes, except instructions without operands, which carry zero.
@@ -20,6 +25,14 @@ class SH7305BTU:
         self.cpg = cpg
         self.max_instructions = max_instructions
         self.regs = bytearray(SIZE)
+        self.break_on_entry = False
+        self.entries = 0
+        self.enabled_entries = 0
+        self.bytecodes = Counter()
+        self.exits = Counter()
+        self.last_entry = None
+        self.last_exit = None
+        self.first_handoffs = []
         self.write32(BASE + 4, 0x000edcba)
 
     def read8(self, addr):
@@ -45,9 +58,18 @@ class SH7305BTU:
 
     def enter(self, cpu, n):
         control = self.read32(BASE)
+        self.entries += 1
+        self.last_entry = {'pc': cpu.pc, 'register': n, 'java_pc': cpu.regs[n], 'control': control}
+        handoff = {'entry': self.last_entry.copy()}
+        if len(self.first_handoffs) < 32:
+            self.first_handoffs.append(handoff)
+        if self.break_on_entry:
+            raise BTUEntryBreakpoint(f'J_JP @R{n} at {cpu.pc:#010x}, Java PC {cpu.regs[n]:#010x}')
         if not (control & 0x80000000) or (self.cpg and self.cpg.mstpcr2 & 0x80000000):
+            self.exits['disabled'] += 1
             cpu.pc = (cpu.pc + 2) & MASK
             return
+        self.enabled_entries += 1
         config = self.read32(BASE + 4)
         loc, spreg, table, jp, scratch = ((config >> shift) & 15 for shift in (16, 12, 8, 4, 0))
         mem, r = cpu.mem, cpu.regs
@@ -69,9 +91,14 @@ class SH7305BTU:
             r[jp], r[spreg], r[scratch] = pc & MASK, sp & MASK, 0
             r[0] = code & MASK
             cpu.pc = mem.read32((r[table] - 4 if event else r[table] + op * 4) & MASK)
+            kind = 'event' if event else 'software'
+            self.exits[kind] += 1
+            self.last_exit = {'kind': kind, 'java_pc': pc, 'opcode': op, 'r0': code & MASK, 'stack': sp, 'sh_pc': cpu.pc}
+            handoff['exit'] = self.last_exit.copy()
 
         for _ in range(self.max_instructions):
             op = mem.read8(pc)
+            self.bytecodes[op] += 1
             # Keep gated groups in software.
             gates = control & 0x3fff
             execute = not (gates & ~0x40)

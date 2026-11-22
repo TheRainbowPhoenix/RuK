@@ -6,10 +6,16 @@ from ruk.jcore.memory import Memory
 
 TABLE = 0x8c070000
 STUB = 0xe5200200
-VRAM = 0xfe280000
+# newlib-cp2's statically linked debug renderer writes directly to this RAM
+# buffer (0x8bfffffe + 2). It must match LCD_GetVRAMAddress/ClearScreen.
+VRAM = 0x8c000000
 DEBUG_FONT = 0x8c090000
 DEBUG_FONT_SIZE = 0xc000  # 256 glyphs, 8 by 12 RGB565 pixels
 MASK = 0xffffffff
+
+
+class HH3WaitKey(Exception):
+    """The guest is waiting for interactive input; leave its PC untouched."""
 
 
 class HH3Services:
@@ -151,6 +157,8 @@ class HH3Services:
             m.write32(a, 320); m.write32(b, 528)
         elif name == 'Debug_PrintString':
             s = self.cstring(a); self.output.append(s); print(s, end='', flush=True); result = 1
+        elif name == 'Debug_WaitKey':
+            raise HH3WaitKey('HH3 is waiting for a key')
         elif name in ('Debug_SetCursorPosition', 'LCD_Refresh', 'Input_IsAnyKeyDown', 'Input_GetKeyState'):
             pass
         elif name == 'File_Open':
