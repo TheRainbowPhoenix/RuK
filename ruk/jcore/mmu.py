@@ -82,7 +82,7 @@ class MMU:
 
     def translate(self, va, kind='read'):
         va &= 0xffffffff
-        privileged = bool(self.cpu.regs['sr'] & 0x40000000)
+        privileged = bool(self.cpu.regs._sys['sr'] & 0x40000000)
         write = kind == 'write'
         if va >= 0x80000000:
             if not privileged:
@@ -149,18 +149,20 @@ class MMU:
         else:
             entry.data = value & (0x1ffffdda if insn else 0x1ffffdff)
 
-    def _bus_address(self, physical, original):
+    def _resolve_bus(self, physical, original):
         if original >= 0xe0000000:
-            return original
+            memory, start = self.bus.resolve(original)
+            return original, memory, start
         # Existing machines often map aliases rather than physical addresses.
         candidates = (original, physical, physical | 0x80000000, physical | 0xa0000000) if (original & 0xe0000000 in (0x80000000, 0xa0000000) or not self.mmucr & 1) else (physical | 0x80000000, physical | 0xa0000000, physical)
         for address in candidates:
             try:
-                self.bus.resolve(address)
-                return address
+                memory, start = self.bus.resolve(address)
+                return address, memory, start
             except IndexError:
                 pass
-        return physical
+        memory, start = self.bus.resolve(physical)
+        return physical, memory, start
 
     def _access(self, address, size, kind, value=None):
         address &= 0xffffffff
@@ -178,8 +180,15 @@ class MMU:
         if address >> 24 in (0xf2, 0xf3, 0xf6, 0xf7) and size == 32:
             if kind == 'write': self.array_write(address, value); return None
             return self.array_read(address)
-        target = self._bus_address(physical, address)
-        return getattr(self.bus, ('write' if kind == 'write' else 'read') + str(size))(target, value) if kind == 'write' else getattr(self.bus, 'read' + str(size))(target)
+        target, memory, start = self._resolve_bus(physical, address)
+        offset = target - start
+        if kind != 'write':
+            return getattr(memory, 'read' + str(size))(offset)
+        if target + size // 8 - 1 > start + len(memory):
+            raise IndexError(f'Address overflow : {hex(target)}')
+        if not isinstance(value, int):
+            value = (value[0] if value else 0) if size == 8 else int.from_bytes(value, 'big')
+        return getattr(memory, 'write' + str(size))(offset, value & ((1 << size) - 1))
 
     def fetch16(self, address): return self._access(address, 16, 'fetch')
     def read8(self, address): return self._access(address, 8, 'read')

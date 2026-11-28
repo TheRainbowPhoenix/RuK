@@ -168,6 +168,7 @@ class MemoryMap:
         self._cache_end = -1
         self._cache_mem = None
         self._cache_region_start = -1
+        self._previous_region = None
         # Precomputed sorted list of (start, end, mem) for the cold path.
         self._regions_sorted = []
 
@@ -180,6 +181,7 @@ class MemoryMap:
         # Invalidate caches -- the new region might overlap.
         self._cache_start = -1
         self._cache_end = -1
+        self._previous_region = None
         # Rebuild the sorted regions list (smallest first, so the
         # "most specific region wins" rule is preserved).
         rs = []
@@ -201,6 +203,15 @@ class MemoryMap:
         if cs <= address < self._cache_end:
             return self._cache_mem, self._cache_region_start
 
+        # Instruction fetches and data accesses commonly alternate between
+        # ROM and RAM, so retain the previous non-overlapping cache span too.
+        previous = self._previous_region
+        if previous is not None and previous[0] <= address < previous[1]:
+            self._previous_region = (self._cache_start, self._cache_end,
+                                     self._cache_mem, self._cache_region_start)
+            self._cache_start, self._cache_end, self._cache_mem, self._cache_region_start = previous
+            return self._cache_mem, self._cache_region_start
+
         # Cold path: scan the precomputed (start, end, mem) list.
         # No len() calls needed here -- ends are precomputed in add().
         for index, (start, end, mem) in enumerate(self._regions_sorted):
@@ -214,6 +225,8 @@ class MemoryMap:
                         low = max(low, other_end)
                     elif other_start > address:
                         high = min(high, other_start)
+                self._previous_region = (self._cache_start, self._cache_end,
+                                         self._cache_mem, self._cache_region_start)
                 self._cache_start = low
                 self._cache_end = high
                 self._cache_region_start = start

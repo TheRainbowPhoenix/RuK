@@ -197,6 +197,8 @@ class Register:
             raise IndexError(f"Register index out of range: {key}")
         # Name access
         if type(key) is str:
+            if key == 'sr':
+                return self._sys['sr']
             k = key.lower()
             # Quick path for 'r0'..'r9' (single digit)
             if len(k) == 2 and k[0] == 'r' and k[1].isdigit():
@@ -537,13 +539,14 @@ class CPU:
             # ---- Dispatch ----
             from ruk.jcore.dsp import is_dsp_instruction, handle_dsp_instruction, handle_dsp_transfer
             entry = dispatch[op_val]
-            if (self.regs['sr'] & 0x1000) and handle_dsp_transfer(self, op_val):
+            dsp_enabled = self.regs._sys['sr'] & 0x1000
+            if dsp_enabled and handle_dsp_transfer(self, op_val):
                 pass
             elif (op_val & 0xF0FF) == 0x0043:
                 # Sdsha's TRACE handler reads Rn for trace instrumentation.
                 _ = self.regs[(op_val >> 8) & 15]
                 self.pc = (pre_pc + 2) & 0xFFFFFFFF
-            elif (self.regs['sr'] & 0x1000) and is_dsp_instruction(op_val):
+            elif dsp_enabled and is_dsp_instruction(op_val):
                 # DSP enable can change at runtime; never cache this decision.
                 if not handle_dsp_instruction(self, op_val):
                     self.pc = (pre_pc + 2) & 0xFFFFFFFF

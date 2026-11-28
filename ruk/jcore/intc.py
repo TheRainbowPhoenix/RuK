@@ -47,7 +47,7 @@ class InterruptController:
     """
 
     def __init__(self):
-        self._queue: "queue.Queue[int]" = queue.Queue()
+        self._queue = queue.SimpleQueue()
         self.enabled = False
 
     def enable(self):
@@ -61,7 +61,7 @@ class InterruptController:
         self._queue.put(intevt & 0xFFFF)
 
     def take_pending(self) -> Optional[int]:
-        if not self.enabled:
+        if not self.enabled or self._queue.empty():
             return None
         try:
             return self._queue.get_nowait()
