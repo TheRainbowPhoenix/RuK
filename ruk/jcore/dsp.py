@@ -286,10 +286,7 @@ def is_dsp_instruction(op_val: int) -> bool:
     return (
         (op_val & 0xFC00) == 0xF800
         or (op_val & 0xFC00) == 0xF000
-        or (
-            (op_val & 0xFC00) == 0xF400
-            and DSP_SINGLE_DATA_REG_TABLE[(op_val >> 4) & 15] is not None
-        )
+        or (op_val & 0xFC00) == 0xF400
     )
 
 
@@ -749,12 +746,12 @@ def _dsp_padd_psub(cpu, word):
     else:  # 0x85..0x87: PSUB Sy,Sx,Dz (+ DCT/DCF)
         base, subtract, reversed_sources, with_carry = 0x85, True, True, False
     conditional = opcode - base
-    if conditional and not _dsp_dct_dcf_active(cpu, conditional):
-        cpu.pc = _u32(cpu.pc + 4)
-        return True
     dest = DSP_DZ_TABLE[word & 15]
     if dest is None:
         return False
+    if conditional and not _dsp_dct_dcf_active(cpu, conditional):
+        cpu.pc = _u32(cpu.pc + 4)
+        return True
     value, guard, carry, _ = _dsp_add_sub40(
         cpu, word, subtract=subtract, reversed_sources=reversed_sources,
         with_carry=with_carry)
@@ -771,25 +768,15 @@ def _dsp_padd_psub(cpu, word):
 
 
 def _dsp_pcmp(cpu, word):
-    """PCMP Sx,Sy (Sdsha handler 0x10030a40): SR.T = Sx > Sy (40-bit
-    signed compare); no DSR update, no writeback.  Bits 3:0 are a
-    reserved field and must be zero."""
+    """Compare Sx - Sy and update the arithmetic flags without writeback."""
     if word & 0xF:
         return False
-    a_name = DSP_SXLOAD_TABLE[(word >> 6) & 3]
-    b_name = DSP_SYLOAD_TABLE[(word >> 4) & 3]
-    a_value, a_guard = _dsp_load40(cpu, a_name)
-    b_value, b_guard = _dsp_load40(cpu, b_name)
-    a40 = (a_guard << 32) | a_value
-    b40 = (b_guard << 32) | b_value
-    if a40 & (1 << 39):
-        a40 -= 1 << 40
-    if b40 & (1 << 39):
-        b40 -= 1 << 40
-    if a40 > b40:
-        cpu.regs['sr'] |= 1
-    else:
-        cpu.regs['sr'] &= ~1 & 0xFFFFFFFF
+    value, guard, carry, _ = _dsp_add_sub40(cpu, word, subtract=True)
+    value, guard, overflow = _dsp_sat40(value, guard, bool(cpu.regs['sr'] & 2))
+    negative = int(bool(guard & 0x80))
+    zero = int(guard == 0 and value == 0)
+    gt, ge = _dsp_arith_gt_ge(value, guard)
+    _dsp_write_flags(cpu, carry, negative, zero, overflow, gt, ge)
     cpu.pc = _u32(cpu.pc + 4)
     return True
 
@@ -891,12 +878,12 @@ def _dsp_pshl_psha(cpu, word, arithmetic):
     opcode = word >> 8
     base = 0x91 if arithmetic else 0x81
     conditional = opcode - base
-    if conditional and not _dsp_dct_dcf_active(cpu, conditional):
-        cpu.pc = _u32(cpu.pc + 4)
-        return True
     dest = DSP_DZ_TABLE[word & 15]
     if dest is None:
         return False
+    if conditional and not _dsp_dct_dcf_active(cpu, conditional):
+        cpu.pc = _u32(cpu.pc + 4)
+        return True
     src = DSP_SXLOAD_TABLE[(word >> 6) & 3]
     count_reg = DSP_SYLOAD_TABLE[(word >> 4) & 3]
     raw_amount = (cpu.regs[count_reg] >> 16) & (0x7F if arithmetic else 0x3F)

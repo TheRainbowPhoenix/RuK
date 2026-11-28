@@ -308,7 +308,7 @@ class _Assembler:
 
         # ---- Instructions ----
         source = mnem + ' ' + ','.join(ops)
-        if re.search(r'\b(?:movx\.[wl]|movy\.[wl]|nopx|nopy)\b', source, re.I) and mnem not in ('nopx', 'nopy', 'movx.w', 'movx.l', 'movy.w', 'movy.l'):
+        if re.search(r'\b(?:movx\.[wl]|movy\.[wl]|nopx|nopy)\b', source, re.I):
             self._emit_combined_pop(source, addr, lineno)
             return
         self._emit_instr(mnem, ops, addr, lineno)
@@ -364,6 +364,9 @@ class _Assembler:
                 break
         if prefix is None:
             raise ValueError('MOVX/MOVY operands cannot share a DSP instruction')
+        if not pop_source:
+            self.emit16(prefix & ~0x0800)
+            return
         _, pop_mnem, pop_ops, _ = _parse_line(pop_source.lower())
         if not pop_mnem:
             raise ValueError('combined DSP instruction requires a P-operation')
@@ -769,12 +772,18 @@ class _Assembler:
         if mnem == 'lds':
             m = parse_reg(ops[0])
             reg = ops[1].lower()
+            dsp = {'dsr': 6, 'a0': 7, 'x0': 8, 'x1': 9, 'y0': 10, 'y1': 11}
+            if m is not None and reg in dsp:
+                self.emit16(0x400a | (m << 8) | (dsp[reg] << 4)); return
             if reg == 'pr':   self.emit16(0x402A | (m << 8)); return
             if reg == 'mach': self.emit16(0x400A | (m << 8)); return
             if reg == 'macl': self.emit16(0x401A | (m << 8)); return
         if mnem == 'sts':
             n = parse_reg(ops[1])
             reg = ops[0].lower()
+            dsp = {'dsr': 6, 'a0': 7, 'x0': 8, 'x1': 9, 'y0': 10, 'y1': 11}
+            if n is not None and reg in dsp:
+                self.emit16(0x000a | (n << 8) | (dsp[reg] << 4)); return
             if reg == 'pr':   self.emit16(0x002A | (n << 8)); return
             if reg == 'mach': self.emit16(0x000A | (n << 8)); return
             if reg == 'macl': self.emit16(0x001A | (n << 8)); return
@@ -785,6 +794,9 @@ class _Assembler:
             n_str = ops[1].replace('@', '').replace('-', '').replace('+', '')
             n = parse_reg(n_str)
             if n is not None:
+                dsp = {'dsr': 6, 'a0': 7, 'x0': 8, 'x1': 9, 'y0': 10, 'y1': 11}
+                if reg in dsp and ops[1].strip().lower() == f'@-r{n}':
+                    self.emit16(0x4002 | (n << 8) | (dsp[reg] << 4)); return
                 if reg == 'pr':   self.emit16(0x4022 | (n << 8)); return  # STS.L PR, @-Rn
                 if reg == 'mach': self.emit16(0x4002 | (n << 8)); return
                 if reg == 'macl': self.emit16(0x4012 | (n << 8)); return
@@ -794,12 +806,18 @@ class _Assembler:
             m_str = ops[0].replace('@', '').replace('-', '').replace('+', '')
             m = parse_reg(m_str)
             if m is not None:
+                dsp = {'dsr': 6, 'a0': 7, 'x0': 8, 'x1': 9, 'y0': 10, 'y1': 11}
+                if reg in dsp and ops[0].strip().lower() == f'@r{m}+':
+                    self.emit16(0x4006 | (m << 8) | (dsp[reg] << 4)); return
                 if reg == 'pr':   self.emit16(0x4026 | (m << 8)); return  # LDS.L @Rm+, PR
                 if reg == 'mach': self.emit16(0x4006 | (m << 8)); return
                 if reg == 'macl': self.emit16(0x4016 | (m << 8)); return
         if mnem == 'ldc':
             m = parse_reg(ops[0])
             reg = ops[1].lower()
+            dsp_control = {'mod': 5, 'rs': 6, 're': 7}
+            if m is not None and reg in dsp_control:
+                self.emit16(0x400e | (m << 8) | (dsp_control[reg] << 4)); return
             if reg == 'sr':  self.emit16(0x400E | (m << 8)); return
             if reg == 'gbr': self.emit16(0x401E | (m << 8)); return
             if reg == 'vbr': self.emit16(0x402E | (m << 8)); return
@@ -809,12 +827,24 @@ class _Assembler:
         if mnem == 'stc':
             reg = ops[0].lower()
             n = parse_reg(ops[1])
+            dsp_control = {'mod': 5, 'rs': 6, 're': 7}
+            if n is not None and reg in dsp_control:
+                self.emit16(0x0002 | (n << 8) | (dsp_control[reg] << 4)); return
             if reg == 'sr':  self.emit16(0x000E | (n << 8)); return
             if reg == 'gbr': self.emit16(0x001E | (n << 8)); return
             if reg == 'vbr': self.emit16(0x002E | (n << 8)); return
             if reg == 'ssr': self.emit16(0x0016 | (n << 8)); return
             if reg == 'spc': self.emit16(0x0026 | (n << 8)); return
             if reg == 'dbr': self.emit16(0x002F | (n << 8)); return
+        if mnem in ('ldc.l', 'stc.l'):
+            dsp_control = {'mod': 5, 'rs': 6, 're': 7}
+            load = mnem == 'ldc.l'
+            address = ops[0].strip().lower() if load else ops[1].strip().lower()
+            reg = ops[1].strip().lower() if load else ops[0].strip().lower()
+            match = re.fullmatch(r'@r(\d+)\+' if load else r'@-r(\d+)', address)
+            if match and int(match.group(1)) < 16 and reg in dsp_control:
+                self.emit16(0x4000 | (int(match.group(1)) << 8)
+                            | (dsp_control[reg] << 4) | (7 if load else 3)); return
 
         # ---- SWAP ----
         if mnem == 'swap.b':
@@ -955,9 +985,9 @@ class _Assembler:
             raise ValueError(f'{mnem} encoding is not implemented')
 
         # ---- DSP: PADD / PSUB / PMULS / PCLR / etc. ----
-        if mnem in ('dct', 'dcf') and ops and ops[0].startswith('p'):
+        if mnem in ('dct', 'dcf') and ops and ops[0].lower().startswith('p'):
             head = ops[0].split()
-            self._emit_pop(head[0], [mnem] + head[1:] + ops[1:], addr)
+            self._emit_pop(head[0].lower(), [mnem] + head[1:] + ops[1:], addr)
             return
         if mnem in ('padd', 'psub', 'psubc', 'paddc', 'pand', 'pxor',
                     'por', 'pcmp', 'pmuls', 'pclr', 'psts', 'plds',
@@ -1309,10 +1339,6 @@ class _Assembler:
             marker_sx = 0x10 if mnem == 'pswap' or special_cond else 0
             marker_sy = 0x40 if mnem == 'pswap' or special_cond else 0
             delta = cond + int(bool(special_cond))
-            if cond and mnem in ('pswap', 'pdmsb', 'pinc'):
-                raise ValueError(f'DCT/DCF encoding not pinned for {mnem}')
-            if cond and mnem == 'pdec' and src_name in self._POP_SY:
-                raise ValueError(f'DCT/DCF encoding not pinned for {mnem}')
             if src_name in self._POP_SX:
                 word = (sx_base + delta) << 8 \
                     | marker_sx | self._POP_SX[src_name] << 6 \
@@ -1337,6 +1363,8 @@ class _Assembler:
         is_long = mnem.endswith('.l')
         if addr_op.startswith('@-'):
             reg, mode = addr_op[2:], 0
+        elif addr_op.startswith('@') and addr_op.endswith('+r8'):
+            reg, mode = addr_op[1:-3], 12
         elif addr_op.startswith('@') and addr_op.endswith('+'):
             reg, mode = addr_op[1:-1], 8
         elif addr_op.startswith('@') and '+' not in addr_op:

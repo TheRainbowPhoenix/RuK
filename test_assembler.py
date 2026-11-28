@@ -424,9 +424,10 @@ class TestDSPInstructions(unittest.TestCase):
                 self.assertEqual(self._asm(source).hex(), expected)
 
     def test_operandless_pop_and_isolated_move_slots_rejected(self):
-        for source in ('padd', 'padd dct', 'nopx', 'nopy'):
+        for source in ('padd', 'padd dct'):
             with self.subTest(source=source), self.assertRaises(ValueError):
                 self._asm(source)
+        self.assertEqual(self._asm('nopx\nnopy').hex(), 'f000f000')
 
     def test_dsp_repeat_loop(self):
         code = """

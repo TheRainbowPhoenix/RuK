@@ -493,6 +493,17 @@ class CPU:
             self.pc = (vbr + 0x100) & 0xFFFFFFFF
         self.is_sleeping = False
 
+    def _deliver_illegal_instruction(self, fault_pc: int):
+        """Enter the SH-4/SH4AL general exception vector for an illegal opcode."""
+        self._ldst = False
+        self.spc = fault_pc & 0xffffffff
+        self.ssr = self.regs['sr']
+        self.sgr = self.regs[15]
+        self.expevt = 0x180
+        self.regs['sr'] = self.ssr | SR_MD | SR_BL | SR_RB
+        self.pc = (self.regs['vbr'] + 0x100) & 0xffffffff
+        self.is_sleeping = False
+
     def step(self):
         """Execute one SH-4 instruction at self.pc.
 
@@ -549,7 +560,7 @@ class CPU:
             elif dsp_enabled and is_dsp_instruction(op_val):
                 # DSP enable can change at runtime; never cache this decision.
                 if not handle_dsp_instruction(self, op_val):
-                    self.pc = (pre_pc + 2) & 0xFFFFFFFF
+                    self._deliver_illegal_instruction(pre_pc)
             elif entry is not None:
                 # Happy path: precomputed (handler, args_tuple).
                 # `handler(*args)` is the positional-call form -- ~30%
