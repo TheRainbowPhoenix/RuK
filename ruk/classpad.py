@@ -7,7 +7,7 @@ class Classpad:
                  with_tmu: bool = False, with_rtc: bool = False, with_ubc: bool = False,
                  with_dma: bool = False, with_display: bool = False,
                  with_bsc: bool = True, with_cpg: bool = True,
-                 with_touch: bool = False, with_btu: bool = False):
+                 with_touch: bool = False, with_btu: bool = False, with_adc: bool = True):
         """
         Create a virtual Classpad II.
 
@@ -24,6 +24,7 @@ class Classpad:
         :param with_cpg: If True, attach a CPG (Clock Pulse Generator).
         :param with_touch: If True, attach an I2C + touchscreen.
         :param with_btu: If True, attach the experimental SH7305 BTU.
+        :param with_adc: If True, attach the battery ADC.
         """
         # TODO: get real values !!
         self._ram = Memory(ram_size)
@@ -41,6 +42,9 @@ class Classpad:
             start_pc = 0x8000_0000
 
         self._cpu = CPU(self._memory, start_pc=start_pc, debug=debug)
+        from ruk.jcore.mmu import MMU
+        self._cpu.mmu = MMU(self._cpu, self._memory)
+        self._cpu.mem = self._cpu.mmu
 
         # Initialize CPU registers to sensible defaults (matching cp-emu).
         # Without these, R15 (stack pointer) is 0, causing immediate
@@ -65,6 +69,7 @@ class Classpad:
         self._cpg = None
         self._intc = None
         self._touch = None
+        self._adc = None
         self._with_touch = with_touch   # remembered for _setup_display
 
         if with_tmu:
@@ -83,6 +88,8 @@ class Classpad:
             self._setup_cpg()
         if with_touch:
             self._setup_touch()
+        if with_adc:
+            self._setup_adc()
         self._btu = None
         if with_btu:
             from ruk.jcore.btu import attach_btu
@@ -178,6 +185,24 @@ class Classpad:
         """Attach the I2C + touchscreen."""
         from ruk.jcore.touch import attach_touch
         self._touch = attach_touch(self._memory, display=self._display)
+
+    def _setup_adc(self):
+        from ruk.jcore.adc import ADC, ADC_BASE, ADC_SIZE
+        from ruk.jcore.intc import InterruptController, attach_intc
+        from ruk.jcore.mmio import MMIODevice
+        if self._intc is None:
+            self._intc = InterruptController()
+            attach_intc(self._cpu, self._intc)
+            self._intc.enable()
+        self._adc = ADC()
+        self._adc.on_irq = self._intc.request
+        if self._dma is not None:
+            self._dma.on_irq = self._intc.request
+        self._memory.add(ADC_BASE, MMIODevice(ADC_BASE, ADC_SIZE, self._adc, 'ADC'), name='ADC', perms='RW')
+
+    @property
+    def adc(self):
+        return self._adc
 
     def load_rom(self, rom: bytes):
         self._rom.write_bin(0, rom)

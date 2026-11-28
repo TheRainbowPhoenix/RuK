@@ -5,6 +5,7 @@ if typing.TYPE_CHECKING:  # pragma: no cover
     from ruk.jcore.cpu import CPU
 
 from ctypes import c_long, c_uint32, c_ulong
+from ruk.jcore.mmu import MMUFault
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -47,7 +48,7 @@ _DSP_PROBE = object()
 # Branch-delay-slot helper
 # ---------------------------------------------------------------------------
 
-def _exec_delay_slot(cpu, delay_slot_pc: int, branch_target: int):
+def _exec_delay_slot(cpu, delay_slot_pc: int, branch_target: int, prefetched=None):
     """
     Execute one instruction at `delay_slot_pc`, then set PC to
     `branch_target`.  This models the SH-4's branch-delay slot:
@@ -60,7 +61,7 @@ def _exec_delay_slot(cpu, delay_slot_pc: int, branch_target: int):
     # Run one instruction using the fast dispatch table (not the old
     # disassembler.disasm + resolve path, which was ~10x slower).
     try:
-        op_val = cpu.mem.read16(cpu.pc)
+        op_val = prefetched if prefetched is not None else (cpu.mem.fetch16(cpu.pc) if hasattr(cpu.mem, 'fetch16') else cpu.mem.read16(cpu.pc))
         entry = cpu.emulator._dispatch[op_val]
         if entry is not None:
             handler, args = entry
@@ -70,7 +71,7 @@ def _exec_delay_slot(cpu, delay_slot_pc: int, branch_target: int):
             op, dargs = cpu.disassembler.disasm(op_val)
             callback = cpu.emulator.resolve(op)
             callback(**dargs)
-    except NotImplementedError:
+    except (NotImplementedError, MMUFault):
         raise
     except Exception:
         # If the delay slot fails (e.g. invalid opcode), just advance PC.
@@ -582,22 +583,25 @@ class Emulator:
     def MOVBM(self, m: int, n: int):
         """MOV.B Rm, @-Rn: 8-bit store with pre-decrement."""
         addr = _u32(self.cpu.regs[n] - 1)
+        value = addr if m == n else self.cpu.regs[m]
+        self.cpu.mem.write8(addr, value & 0xFF)
         self.cpu.regs[n] = addr
-        self.cpu.mem.write8(addr, self.cpu.regs[m] & 0xFF)
         self.cpu.pc = _u32(self.cpu.pc + 2)
 
     def MOVWM(self, m: int, n: int):
         """MOV.W Rm, @-Rn: 16-bit store with pre-decrement."""
         addr = _u32(self.cpu.regs[n] - 2)
+        value = addr if m == n else self.cpu.regs[m]
+        self.cpu.mem.write16(addr, value & 0xFFFF)
         self.cpu.regs[n] = addr
-        self.cpu.mem.write16(addr, self.cpu.regs[m] & 0xFFFF)
         self.cpu.pc = _u32(self.cpu.pc + 2)
 
     def MOVLM(self, m: int, n: int):
         """MOV.L Rm, @-Rn: 32-bit store with pre-decrement."""
         addr = _u32(self.cpu.regs[n] - 4)
+        value = addr if m == n else self.cpu.regs[m]
+        self.cpu.mem.write32(addr, value)
         self.cpu.regs[n] = addr
-        self.cpu.mem.write32(addr, self.cpu.regs[m])
         self.cpu.pc = _u32(self.cpu.pc + 2)
 
     def MOVBL4(self, m: int, d: int):
@@ -1490,9 +1494,10 @@ class Emulator:
         """RTE: return from exception. SR=SSR, PC=SPC, with delay slot."""
         target = _u32(self.cpu.spc)
         slot_pc = _u32(self.cpu.pc + 2)
-        # Restore SR from SSR before executing the delay slot
+        # Fetch the slot with the old privileged SR, then restore SR.
+        op = self.cpu.mem.fetch16(slot_pc) if hasattr(self.cpu.mem, 'fetch16') else None
         self.cpu.regs['sr'] = _u32(self.cpu.ssr)
-        _exec_delay_slot(self.cpu, slot_pc, target)
+        _exec_delay_slot(self.cpu, slot_pc, target, prefetched=op)
 
     # ===================================================================
     # System / control
@@ -1538,7 +1543,12 @@ class Emulator:
         self.cpu.pc = _u32(self.cpu.pc + 2)
 
     def LDTLB(self):
-        """LDTLB: load TLB entry.  We don't model the MMU/TLB, so this is a NOP."""
+        """Load PTEH/PTEL into the UTLB entry selected by MMUCR.URC."""
+        if getattr(self.cpu, 'mmu', None) is None:
+            raise NotImplementedError('LDTLB requires an attached MMU')
+        if not self.cpu.regs['sr'] & 0x40000000:
+            raise MMUFault(self.cpu.pc, 0x180, 0x100)
+        self.cpu.mmu.ldtlb()
         self.cpu.pc = _u32(self.cpu.pc + 2)
 
     def MOVLI_LINKED(self, n: int):
@@ -1619,7 +1629,7 @@ class Emulator:
         self.cpu.tra = imm << 2
         self.cpu.expevt = 0x00000160
         # Set SR.BL=1, SR.MD=1, SR.RB=1
-        self.cpu.regs['sr'] |= 0xB0000000
+        self.cpu.regs['sr'] |= 0x70000000
         vbr = self.cpu.regs['vbr']
         self.cpu.pc = _u32(vbr + 0x100)
 

@@ -284,7 +284,7 @@ SR_DSP_BIT = 0x1000
 def is_dsp_instruction(op_val: int) -> bool:
     """Recognize implemented DSP prefixes, independent of SR.DSP."""
     return (
-        op_val == 0xF800
+        (op_val & 0xFC00) == 0xF800
         or (op_val & 0xFC00) == 0xF000
         or (
             (op_val & 0xFC00) == 0xF400
@@ -315,8 +315,11 @@ def handle_dsp_instruction(cpu, op_val: int) -> bool:
     """
     if not _sr_dsp_is_set(cpu):
         return False
-    if op_val == 0xF800:
-        return _execute_standalone_pop(cpu, cpu.mem.read16(_u32(cpu.pc + 2)))
+    if (op_val & 0xFC00) == 0xF800:
+        word = cpu.mem.read16(_u32(cpu.pc + 2))
+        if op_val == 0xF800:
+            return _execute_standalone_pop(cpu, word)
+        return _execute_parallel_pop(cpu, op_val, word)
     if (op_val & 0xFC00) == 0xF000:
         _parallel_moves(cpu, op_val)
         cpu.pc = _u32(cpu.pc + 2)
@@ -324,6 +327,37 @@ def handle_dsp_instruction(cpu, op_val: int) -> bool:
     if is_dsp_instruction(op_val):
         return _handle_movs(cpu, op_val)
     return False
+
+
+class _DeferredDspRegisters:
+    """Stage P-operation writes until parallel moves have sampled inputs."""
+
+    def __init__(self, original):
+        self.original = original
+        self.writes = {}
+
+    def __getitem__(self, key):
+        return self.writes[key] if key in self.writes else self.original[key]
+
+    def __setitem__(self, key, value):
+        self.writes[key] = value & 0xffffffff
+
+
+def _execute_parallel_pop(cpu, prefix, word):
+    """Run the move slots against old state, then commit the P-operation."""
+    original = cpu.regs
+    staged = _DeferredDspRegisters(original)
+    cpu.regs = staged
+    try:
+        handled = _execute_standalone_pop(cpu, word)
+    finally:
+        cpu.regs = original
+    if not handled:
+        return False
+    _parallel_moves(cpu, prefix)
+    for key, value in staged.writes.items():
+        original[key] = value
+    return True
 
 
 def _execute_standalone_pop(cpu, word):
@@ -1099,6 +1133,16 @@ def classify_dsp_pop(word):
 
 def handle_dsp_transfer(cpu, word: int) -> bool:
     """Execute register/memory DSP transfers using CPU73050 encodings."""
+    if (word & 0xf0ff) == 0x4034 or (word & 0xff00) == 0x8a00:
+        if not _sr_dsp_is_set(cpu):
+            return False
+        count = (word & 0xff) if word >> 8 == 0x8a else cpu.regs[(word >> 8) & 15] & 0xfff
+        cpu.regs['sr'] = (cpu.regs['sr'] & ~0x0fff000c) | (count << 16)
+        cpu.regs['rc'] = count
+        cpu.regs['re'] |= 1
+        cpu._dsp_active = bool(count)
+        cpu.pc = _u32(cpu.pc + 2)
+        return True
     if (word & 0xf0ff) == 0x4014 or (word & 0xff00) == 0x8200:
         if not _sr_dsp_is_set(cpu):
             return False

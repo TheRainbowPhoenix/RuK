@@ -3,6 +3,7 @@ from typing import Union
 from ruk.jcore.disassembly import Disassembler
 from ruk.jcore.emulator import Emulator  # generated_
 from ruk.jcore.memory import MemoryMap
+from ruk.jcore.mmu import MMUFault
 
 
 # ----------------------------------------------------------------------------
@@ -76,7 +77,7 @@ SR_Q     = 1 << 8
 SR_M     = 1 << 9
 SR_BL    = 1 << 28      # block exceptions/interrupts
 SR_RB    = 1 << 29      # register bank select
-SR_MD    = 1 << 31      # processor mode (1 = privileged)
+SR_MD    = 1 << 30      # processor mode (1 = privileged)
 
 
 class Register:
@@ -240,6 +241,13 @@ class Register:
                     self._regs_dirty = True
                     return value
             if k in self._sys:
+                if k == 'sr' and getattr(self, 'bank_switching', False):
+                    old_bank = (self._sys['sr'] & 0x60000000) == 0x60000000
+                    new_bank = (value & 0x60000000) == 0x60000000
+                    if old_bank != new_bank:
+                        for i in range(8):
+                            bank_name = f'r{i}_bank'
+                            self._r[i], self._sys[bank_name] = self._sys[bank_name], self._r[i]
                 self._sys[k] = value
                 self._regs_dirty = True
                 return value
@@ -524,7 +532,7 @@ class CPU:
         dsp_cache = emu._dsp_cache
 
         try:
-            op_val = mem.read16(pre_pc)
+            op_val = mem.fetch16(pre_pc) if hasattr(mem, 'fetch16') else mem.read16(pre_pc)
 
             # ---- Dispatch ----
             from ruk.jcore.dsp import is_dsp_instruction, handle_dsp_instruction, handle_dsp_transfer
@@ -535,7 +543,7 @@ class CPU:
                 # Sdsha's TRACE handler reads Rn for trace instrumentation.
                 _ = self.regs[(op_val >> 8) & 15]
                 self.pc = (pre_pc + 2) & 0xFFFFFFFF
-            elif is_dsp_instruction(op_val):
+            elif (self.regs['sr'] & 0x1000) and is_dsp_instruction(op_val):
                 # DSP enable can change at runtime; never cache this decision.
                 if not handle_dsp_instruction(self, op_val):
                     self.pc = (pre_pc + 2) & 0xFFFFFFFF
@@ -569,7 +577,8 @@ class CPU:
             # The loop-exhaustion path sets _dsp_active back to False.
             if self._dsp_active:
                 re_addr = self.regs._sys['re'] & ~1
-                is_setrc = (op_val & 0xf0ff) == 0x4014 or (op_val & 0xff00) == 0x8200
+                is_setrc = ((op_val & 0xf0ff) in (0x4014, 0x4034)
+                            or (op_val & 0xff00) in (0x8200, 0x8a00))
                 size = 4 if (op_val & 0xfc00) == 0xf800 else 2
                 fell_through = self.pc == ((pre_pc + size) & 0xffffffff)
                 if pre_pc == re_addr and not is_setrc and fell_through:
@@ -586,6 +595,21 @@ class CPU:
                             # Loop just ended: fall through past RE.
                             self._dsp_active = False
 
+        except MMUFault as fault:
+            self._ldst = False
+            if fault.event == 0x140 or self.regs['sr'] & SR_BL:
+                self.expevt = 0x140 if fault.event == 0x140 else 0x20
+                self.mmu.write_reg(0xff000010, 4)
+                self.regs['sr'] = 0x700000f0
+                self.regs['vbr'] = 0
+                self.pc = 0xa0000000
+            else:
+                self.spc = pre_pc
+                self.ssr = self.regs['sr']
+                self.sgr = self.regs[15]
+                self.expevt = fault.event
+                self.regs['sr'] = self.ssr | 0x70000000
+                self.pc = (self.regs['vbr'] + fault.vector) & 0xffffffff
         except IndexError:
             self._ldst = False
             self.ebreak = True
@@ -646,78 +670,27 @@ class CPU:
         return self.mem.get_arround(pc, size)
 
     def run(self, max_steps: int = 10000000) -> int:
-        """Fast run mode using JIT compilation.
-
-        This is MUCH faster than calling step() in a loop:
-          - Phase 1: Predecodes blocks and batch-executes handlers
-          - Phase 2: Compiles hot blocks to Python source (exec)
-          - Phase 3: Detects self-looping blocks and wraps them in
-            Python `while True:` loops
-
-        The inner loop of the gradient test (10 instructions × 46k
-        iterations) runs as a SINGLE Python function call with all
-        instructions inlined as straight-line code.
-
-        Use step() for debugging (single-instruction, UBC checks).
-        Use run() for batch execution (LCD rendering, OS boot, etc.).
-
-        Returns the number of steps executed.
-        """
-        from ruk.jcore.jit import JITCompiler
-        if not hasattr(self, '_jit'):
-            self._jit = JITCompiler(self)
-        return self._jit.run(max_steps)
+        """Execute up to max_steps instructions using the interpreter."""
+        count = 0
+        while count < max_steps and not self.ebreak:
+            self.step()
+            count += 1
+        return count
 
     def run_with_check(self, should_continue, max_steps_per_batch: int = 2000,
                        tick_callback=None, tick_interval: int = 500):
-        """JIT run that periodically checks if it should keep running.
-
-        This is the GUI-friendly version of run():
-          - `should_continue()`: called every batch; if it returns False,
-            the run pauses.  Used for the Play/Pause button.
-          - `tick_callback(step_count)`: called every `tick_interval`
-            steps; used for peripheral ticking (RTC, CMT) and GUI refresh.
-          - `max_steps_per_batch`: how many steps to run between checks.
-
-        Yields (steps_run, paused_by_user) tuples so the caller can
-        periodically refresh the GUI.
-
-        The JIT caches persist across calls, so resuming after a pause
-        is fast.
-        """
-        from ruk.jcore.jit import JITCompiler
-        if not hasattr(self, '_jit'):
-            self._jit = JITCompiler(self)
-
-        # Temporarily swap on_step so the JIT's inner loop calls our
-        # tick_callback at the right interval.  We monkey-patch the
-        # JIT's run loop to check `should_continue` between blocks.
-        jit = self._jit
-        cpu = self
-        original_on_step = self.on_step
-
-        # We can't easily hook into the JIT's inner loop, so we run
-        # in batches: each batch runs max_steps_per_batch / tick_interval
-        # = 100 JIT calls, then we call tick_callback and check
-        # should_continue.
+        """Interpret batches until should_continue returns false or CPU stops."""
+        if max_steps_per_batch <= 0 or tick_interval <= 0:
+            raise ValueError('batch size and tick interval must be positive')
         total_steps = 0
-        while should_continue():
-            if cpu.ebreak:
-                break
-            # Run one batch
-            batch_steps = jit.run(max_steps_per_batch)
-            total_steps += batch_steps
-            # Tick peripherals via on_step callback (for touch, display, etc.)
-            if original_on_step is not None:
-                original_on_step(total_steps)
-            if tick_callback is not None:
-                tick_callback(total_steps)
-            # If the JIT ran fewer steps than requested, it hit a
-            # spin loop or end-of-program -- stop.
-            if batch_steps < max_steps_per_batch // 2:
-                break
-
-        self.on_step = original_on_step
+        while should_continue() and not self.ebreak:
+            for _ in range(max_steps_per_batch):
+                if self.ebreak:
+                    break
+                self.step()
+                total_steps += 1
+                if tick_callback is not None and total_steps % tick_interval == 0:
+                    tick_callback(total_steps)
         return total_steps
 
     def jit_stats(self):

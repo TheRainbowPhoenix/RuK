@@ -117,6 +117,10 @@ class TestHH3Loading(unittest.TestCase):
         self.assertNotEqual(cpu.regs[5], 0)             # argv != NULL
         self.assertNotEqual(cpu.regs[6], 0)             # envp != NULL
         self.assertEqual(cpu.regs['pr'], 0xFFFFFFFF)    # PR = invalid
+        self.assertEqual(cpu.regs['sr'], 0x40000000)    # MD=1, bank 0
+        # Fetch must stay in the loaded program, rather than faulting into
+        # the OS because the launch was left in user mode.
+        self.assertEqual(cpu.mem.fetch16(entry), self.cp.mem.read16(entry))
         self.assertFalse(cpu.ebreak)
 
     def test_stack_layout(self):

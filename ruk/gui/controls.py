@@ -33,7 +33,6 @@ class ControlsFrame(BaseFrame):
         self._running = False
         self._tk_root = None  # set in hook()
         self._lcd_viewer = None  # set externally
-        self._use_jit = False  # True when JIT run is active
 
         # Breakpoints: software breakpoints are addresses where the CPU
         # should pause.  Hardware breakpoints use the UBC (max 2).
@@ -71,16 +70,6 @@ class ControlsFrame(BaseFrame):
             command=self.do_stop
         )
         HookToolTip(self.stop_btn, "Stop")
-
-        # Run (JIT) button - uses JIT-accelerated execution
-        self.jit_btn = ttk.Button(
-            master=widget,
-            text="JIT",
-            width=4,
-            style="Titlebar.TButton",
-            command=self.do_run_jit
-        )
-        HookToolTip(self.jit_btn, "Run (JIT)")
 
         self.continue_until_btn = ttk.Button(
             widget,
@@ -143,9 +132,6 @@ class ControlsFrame(BaseFrame):
         self.except_pause_btn.grid(row=0, column=col, padx=2)
         col += 1
         self.breakpoints_btn.grid(row=0, column=col, padx=2)
-        col += 1
-        self.jit_btn.grid(row=0, column=col, padx=2)
-        col += 1
 
     def continue_until_changed(self):
         """Cycle through continue-until modes: call -> syscall -> breakpoint."""
@@ -202,17 +188,6 @@ class ControlsFrame(BaseFrame):
             self.start_btn.configure(image=self.resources['pause'])
             self._run_batch()
 
-    def do_run_jit(self):
-        """Run using JIT-accelerated execution (faster, but less debug info)."""
-        if self._running:
-            self._running = False
-            self._refresh_callback()
-            return
-        self._running = True
-        self._use_jit = True
-        self.start_btn.configure(image=self.resources['pause'])
-        self._run_batch()
-
     def _run_batch(self):
         """Run one batch of CPU steps, then schedule the next batch."""
         if not self._running or self._cpu.ebreak:
@@ -228,59 +203,22 @@ class ControlsFrame(BaseFrame):
             self._refresh_callback()
             return
 
-        # Use JIT-accelerated run if available; fall back to step() loop.
-        # The JIT runs in batches of max_steps_per_batch, then returns
-        # control so we can check for pause/breakpoints and refresh the GUI.
-        if hasattr(self._cpu, 'run') and False:
+        for _ in range(1000):
+            if self._cpu.ebreak:
+                break
+            if self._cpu.pc in self._soft_breakpoints:
+                self._running = False
+                self.start_btn.configure(image=self.resources['start'])
+                self._refresh_callback()
+                return
             try:
-                # Run a batch of ~50K steps via JIT.  should_continue
-                # returns False if the user clicked Pause.  We check
-                # soft breakpoints after each batch.
-                # Note: peripheral ticking (RTC, CMT) is handled inside
-                # the JIT's run loop via cpu.on_step, so we don't need
-                # to pass a tick_callback here.
-                self._cpu.run_with_check(
-                    should_continue=lambda: self._running and not self._cpu.ebreak,
-                    max_steps_per_batch=2000,
-                    tick_callback=None,
-                )
+                self._cpu.step()
             except Exception as e:
                 print(f"!!! CPU Error : {e} !!!")
                 self._running = False
                 self.start_btn.configure(image=self.resources['start'])
                 self._refresh_callback()
                 return
-
-            # Check software breakpoints after the batch
-            if hasattr(self, '_soft_breakpoints') and self._cpu.pc in self._soft_breakpoints:
-                self._running = False
-                self.start_btn.configure(image=self.resources['start'])
-                self._refresh_callback()
-                return
-        else:
-            # Fallback: step() loop (no JIT)
-            batch_size = 1000
-            
-            for _ in range(batch_size):
-                if self._cpu.ebreak:
-                    break
-
-                # Check software breakpoints
-                if hasattr(self, '_soft_breakpoints') and self._cpu.pc in self._soft_breakpoints:
-                    # Hit a software breakpoint -> pause
-                    self._running = False
-                    self.start_btn.configure(image=self.resources['start'])
-                    self._refresh_callback()
-                    return
-
-                try:
-                    self._cpu.step()
-                except Exception as e:
-                    print(f"!!! CPU Error : {e} !!!")
-                    self._running = False
-                    self.start_btn.configure(image=self.resources['start'])
-                    self._refresh_callback()
-                    return
 
         # Periodically refresh the GUI (every batch)
         self._refresh_callback()
@@ -292,13 +230,6 @@ class ControlsFrame(BaseFrame):
                     self._lcd_viewer._refresh()
             except:
                 self._lcd_viewer = None
-
-        # Tick peripherals (touch, display, etc.) -- needed because JIT
-        # bypasses the on_step callback that normally calls _tick_peripherals
-        if hasattr(self._cpu, '_cp') and self._cpu._cp is not None:
-            cp = self._cpu._cp
-            if hasattr(cp, '_tick_peripherals'):
-                cp._tick_peripherals(1)
 
         # Schedule the next batch using after() so the GUI stays responsive
         if self._tk_root is not None:
@@ -322,7 +253,6 @@ class ControlsFrame(BaseFrame):
             self._tk_root = root.winfo_toplevel()
         except:
             self._tk_root = None
-        # Connect classpad to CPU for peripheral ticking during JIT runs
         if hasattr(self, '_cp_classpad') and self._cp_classpad is not None:
             self._cpu._cp = self._cp_classpad
 

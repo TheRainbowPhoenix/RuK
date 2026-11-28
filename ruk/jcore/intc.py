@@ -30,7 +30,7 @@ import queue
 
 
 # SH-4 SR bit fields we care about
-SR_MD  = 1 << 31        # processor mode (1 = privileged)
+SR_MD  = 1 << 30        # processor mode (1 = privileged)
 SR_RB  = 1 << 29        # register bank
 SR_BL  = 1 << 28        # exception/interrupt mask (blocks ALL exceptions)
 SR_IF_MASK = 0x000000F0 # interrupt priority mask (bits 4-7)
@@ -80,10 +80,6 @@ class InterruptController:
 # CPU patching
 # ---------------------------------------------------------------------------
 
-# Saved reference to the original CPU.step() function, so we can chain to it.
-_orig_step = None
-
-
 def _interruptible_step(self):
     """
     Replacement for CPU.step() that checks the INTC before each instruction.
@@ -95,9 +91,8 @@ def _interruptible_step(self):
             _deliver_interrupt(self, intevt)
             return
 
-    # Run the original step (calling the saved function directly with `self`)
-    # _orig_step is a bound method of cpu, so we don't pass self again.
-    _orig_step()
+    # The original bound method belongs to this CPU instance.
+    self._step_without_intc()
 
 
 def _deliver_interrupt(cpu, intevt: int):
@@ -120,7 +115,7 @@ def _deliver_interrupt(cpu, intevt: int):
     cpu._ldst = False
     sr = cpu.regs['sr']
     # Block further exceptions
-    new_sr = sr | (1 << 31) | (1 << 29) | (1 << 28)
+    new_sr = sr | SR_MD | SR_RB | SR_BL
     # Save state
     cpu.spc = cpu.pc
     cpu.ssr = sr
@@ -137,8 +132,7 @@ def attach_intc(cpu, intc: InterruptController):
     Attach an InterruptController to a CPU.  Patches the CPU's step()
     method so it checks the INTC before each instruction.
     """
-    global _orig_step
-    if _orig_step is None:
-        _orig_step = cpu.step
+    if not hasattr(cpu, '_step_without_intc'):
+        cpu._step_without_intc = cpu.step
     cpu._intc = intc
     cpu.step = _interruptible_step.__get__(cpu, type(cpu))

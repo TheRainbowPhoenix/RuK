@@ -307,7 +307,71 @@ class _Assembler:
             return
 
         # ---- Instructions ----
+        source = mnem + ' ' + ','.join(ops)
+        if re.search(r'\b(?:movx\.[wl]|movy\.[wl]|nopx|nopy)\b', source, re.I) and mnem not in ('nopx', 'nopy', 'movx.w', 'movx.l', 'movy.w', 'movy.l'):
+            self._emit_combined_pop(source, addr, lineno)
+            return
         self._emit_instr(mnem, ops, addr, lineno)
+
+    def _emit_combined_pop(self, source, addr, lineno):
+        """Encode ASMSH's P-op [MOVX/NOPX] [MOVY/NOPY] syntax."""
+        from ruk.jcore.dsp import _XY_SLOTS, _decode_parallel_slot
+
+        matches = list(re.finditer(r'\b(?:movx\.[wl]|movy\.[wl]|nopx|nopy)\b', source, re.I))
+        pop_source = source[:matches[0].start()].strip()
+        slots = {'x': None, 'y': None}
+        seen = set()
+        for i, match in enumerate(matches):
+            mnemonic = match.group().lower()
+            axis = mnemonic[-1] if mnemonic.startswith('nop') else mnemonic[3]
+            if axis in seen:
+                raise ValueError(f'duplicate {axis.upper()} move slot')
+            seen.add(axis)
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(source)
+            operands = source[match.end():end].strip()
+            if mnemonic.startswith('nop'):
+                if operands:
+                    raise ValueError(f'{mnemonic.upper()} takes no operands')
+                continue
+            parts = _split_ops(operands)
+            if len(parts) != 2:
+                raise ValueError(f'{mnemonic.upper()} requires two operands')
+            parts = [part.strip().lower().replace(' ', '') for part in parts]
+            load = parts[0].startswith('@')
+            address, data = (parts[0], parts[1]) if load else (parts[1], parts[0])
+            address_match = re.fullmatch(r'@r(\d+)(\+r(8|9)|\+)?', address)
+            if not address_match:
+                raise ValueError(f'invalid {mnemonic.upper()} address: {address}')
+            reg = int(address_match.group(1))
+            suffix = address_match.group(2)
+            if suffix and len(suffix) > 1 and int(address_match.group(3)) != (8 if axis == 'x' else 9):
+                raise ValueError(f'{mnemonic.upper()} uses R{8 if axis == "x" else 9} for indexed addressing')
+            mode = 0 if not suffix else (1 if suffix == '+' else 2)
+            slots[axis] = (reg, data, 'load' if load else 'store',
+                           4 if mnemonic.endswith('.l') else 2, mode)
+
+        prefix = None
+        for low in range(0x400):
+            candidate = 0xf800 | low
+            xid, yid = _XY_SLOTS[low & 63]
+            both = xid != 359 and yid != 360
+            decoded = {
+                'x': None if xid == 359 else _decode_parallel_slot('x', xid, candidate, both),
+                'y': None if yid == 360 else _decode_parallel_slot('y', yid, candidate, both),
+            }
+            if decoded == slots:
+                prefix = candidate
+                break
+        if prefix is None:
+            raise ValueError('MOVX/MOVY operands cannot share a DSP instruction')
+        _, pop_mnem, pop_ops, _ = _parse_line(pop_source.lower())
+        if not pop_mnem:
+            raise ValueError('combined DSP instruction requires a P-operation')
+        start = len(self.output)
+        self._emit_instr(pop_mnem, pop_ops, addr, lineno)
+        if len(self.output) != start + 4 or self.output[start:start + 2] != b'\xf8\x00':
+            raise ValueError('combined DSP instruction requires a P-operation')
+        self.output[start:start + 2] = prefix.to_bytes(2, 'big')
 
     def _resolve_value(self, tok: str, cur_addr: int = 0) -> int:
         """Resolve a value: immediate, label, or expression.

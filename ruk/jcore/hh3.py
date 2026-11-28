@@ -504,14 +504,15 @@ def run_hh3(classpad, path: str,
     # 3. Set up CPU registers
     cpu = classpad.cpu
     cpu.pc = entry & 0xFFFFFFFF
+    # Select the launch bank BEFORE populating R4..R6: changing RB can swap
+    # them with the reset bank. MD is bit 30, not reserved bit 31.
+    cpu.regs['sr'] = 0x40000000  # privileged, unbanked, exceptions enabled
     cpu.regs[15] = sp          # R15 = stack pointer (top of argc)
     cpu.regs[4]  = len(argv)   # R4  = argc
     cpu.regs[5]  = argv_ptr    # R5  = argv
     cpu.regs[6]  = envp_ptr    # R6  = envp
     # PR = 0xFFFFFFFF so a missing RTS is caught
     cpu.regs['pr'] = 0xFFFFFFFF
-    # SR: MD=1 (privileged), RB=0, BL=0, IMASK=0
-    cpu.regs['sr'] = 0x80000000
     cpu.ebreak = False
 
     return entry
